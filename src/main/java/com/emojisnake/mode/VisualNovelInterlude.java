@@ -1,10 +1,10 @@
 package com.emojisnake.mode;
 
+import com.emojisnake.fx.TextFit;
 import com.emojisnake.vn.Choice;
 import com.emojisnake.vn.Story;
 import com.emojisnake.vn.StoryNode;
 import com.emojisnake.vn.StoryState;
-import java.util.ArrayList;
 import java.util.List;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.effect.BlendMode;
@@ -32,7 +32,7 @@ import javafx.scene.text.TextAlignment;
 public final class VisualNovelInterlude implements Interlude {
 
     private static final double CHARS_PER_SEC = 48;
-    private static final int WRAP_CHARS = 50;
+    private static final Font BODY_FONT = Font.font("Segoe UI", FontWeight.NORMAL, 18);
 
     private final StoryState state;
     private final VnArt art;
@@ -44,6 +44,8 @@ public final class VisualNovelInterlude implements Interlude {
     private boolean acknowledged; // an ending has been dismissed -> we're done
 
     private String wrappedFor;    // node id the cached wrap belongs to
+    private double wrappedWidth = -1; // wrap width the cache belongs to
+    private double wrapWidth = 590;   // measured-pixel wrap width (set from render's w)
     private List<String> lines = List.of();
     private int totalChars;
 
@@ -127,6 +129,7 @@ public final class VisualNovelInterlude implements Interlude {
 
     @Override
     public void render(GraphicsContext gc, double w, double h) {
+        wrapWidth = w - 50; // dialogue box runs ~x=30..w-14; keep a margin so text never crops
         ensureWrapped();
         StoryNode cur = state.current();
         double hue = (elapsed * (meta ? 60 : 25)) % 360; // eye-bleed escalates once the meta is awake
@@ -301,9 +304,9 @@ public final class VisualNovelInterlude implements Interlude {
             gc.fillText(cur.speaker(), 30, boxTop + 26);
         }
 
-        // Typewritered, wrapped body text.
+        // Typewritered, body text wrapped to the box by measured width (so it never crops).
         gc.setTextAlign(TextAlignment.LEFT);
-        gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 18));
+        gc.setFont(BODY_FONT);
         gc.setFill(Color.web("#eaf4ea"));
         int remaining = typedChars();
         double ty = boxTop + 54;
@@ -325,8 +328,8 @@ public final class VisualNovelInterlude implements Interlude {
         double pulse = 0.5 + 0.5 * Math.sin(elapsed * 6.0);
         gc.setTextAlign(TextAlignment.LEFT);
         gc.setTextBaseline(javafx.geometry.VPos.CENTER); // vertically centre the label in its box
-        gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
         double boxH = rowH - 6;
+        double labelMax = w - 84; // box is x=30..w-30, text at x=42, leave a right margin
         for (int i = 0; i < choices.size(); i++) {
             double y = startY + i * rowH;
             boolean sel = i == selected;
@@ -338,7 +341,9 @@ public final class VisualNovelInterlude implements Interlude {
                 gc.strokeRoundRect(30, y, w - 60, boxH, 10, 10);
             }
             gc.setFill(sel ? Color.web("#aef5b0") : Color.web("#9fb39f"));
-            gc.fillText((sel ? "▸ " : "  ") + (i + 1) + ". " + choices.get(i).label(), 42, y + boxH / 2);
+            String label = (sel ? "▸ " : "  ") + (i + 1) + ". " + choices.get(i).label();
+            gc.setFont(TextFit.fit(label, "Segoe UI", FontWeight.BOLD, 18, labelMax)); // shrink to fit
+            gc.fillText(label, 42, y + boxH / 2);
         }
         gc.setTextBaseline(javafx.geometry.VPos.BASELINE); // restore the default for later text
     }
@@ -365,11 +370,12 @@ public final class VisualNovelInterlude implements Interlude {
 
     private void ensureWrapped() {
         String id = state.current().id();
-        if (id.equals(wrappedFor)) {
+        if (id.equals(wrappedFor) && wrapWidth == wrappedWidth) {
             return;
         }
         wrappedFor = id;
-        lines = wrap(state.current().text(), WRAP_CHARS);
+        wrappedWidth = wrapWidth;
+        lines = TextFit.wrap(state.current().text(), BODY_FONT, wrapWidth); // measured pixels: never crops
         totalChars = lines.stream().mapToInt(String::length).sum();
     }
 
@@ -379,24 +385,5 @@ public final class VisualNovelInterlude implements Interlude {
 
     private boolean textComplete() {
         return typedChars() >= totalChars;
-    }
-
-    private static List<String> wrap(String text, int maxChars) {
-        List<String> out = new ArrayList<>();
-        StringBuilder line = new StringBuilder();
-        for (String word : text.split(" ")) {
-            if (line.length() + word.length() + 1 > maxChars && line.length() > 0) {
-                out.add(line.toString());
-                line.setLength(0);
-            }
-            if (line.length() > 0) {
-                line.append(' ');
-            }
-            line.append(word);
-        }
-        if (line.length() > 0) {
-            out.add(line.toString());
-        }
-        return out;
     }
 }

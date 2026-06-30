@@ -8,6 +8,7 @@ import com.emojisnake.fx.FxDirector;
 import com.emojisnake.fx.GlitchDirector;
 import com.emojisnake.fx.ParticleSystem;
 import com.emojisnake.fx.RenderLayers;
+import com.emojisnake.fx.TextFit;
 import com.emojisnake.fx.Tween;
 import com.emojisnake.mode.DodgeBossInterlude;
 import com.emojisnake.mode.FakeCrashInterlude;
@@ -1267,7 +1268,7 @@ public class EmojiSnakeApp extends Application {
         if (toastTimer > 0 && game.status() == GameState.Status.RUNNING && started) {
             gc.setTextAlign(TextAlignment.CENTER);
             gc.setTextBaseline(VPos.CENTER);
-            gc.setFont(Font.font("Consolas", FontWeight.BOLD, 26));
+            gc.setFont(TextFit.fit(toast, "Consolas", FontWeight.BOLD, 26, WIDTH - 40));
             gc.setFill(ACCENT);
             gc.fillText(toast, WIDTH / 2.0, HUD_HEIGHT + 40);
         }
@@ -1317,13 +1318,13 @@ public class EmojiSnakeApp extends Application {
         gc.setTextBaseline(VPos.CENTER);
 
         gc.setFill(ACCENT);
-        gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 44));
+        gc.setFont(TextFit.fit(title, "Segoe UI", FontWeight.BOLD, 44, WIDTH - 40));
         gc.fillText(title, cx, cy - 28);
 
         gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 18));
         double y = cy + 18;
         for (String line : lines) {
+            gc.setFont(TextFit.fit(line, "Segoe UI", FontWeight.NORMAL, 18, WIDTH - 40));
             gc.fillText(line, cx, y);
             y += 26;
         }

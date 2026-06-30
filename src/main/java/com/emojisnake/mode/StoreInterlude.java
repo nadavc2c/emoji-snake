@@ -6,6 +6,7 @@ import com.emojisnake.EmojiAtlas;
 import com.emojisnake.GameState;
 import com.emojisnake.StatusKind;
 import com.emojisnake.Tile;
+import com.emojisnake.fx.TextFit;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
@@ -225,10 +226,11 @@ public final class StoreInterlude implements Interlude {
         gc.fillText("THE COMPANY STORE", w / 2 - 86, 42);
 
         gc.setTextAlign(TextAlignment.CENTER);
-        gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 16));
         gc.setFill(Color.web("#7ee081"));
-        gc.fillText("score: " + game.score() + "      Floor " + rank + "/" + maxFloors
-                + (endingUnlocked() ? "  -  the way out is open" : ""), w / 2, 66);
+        String hdr = "score: " + game.score() + "      Floor " + rank + "/" + maxFloors
+                + (endingUnlocked() ? "  -  the way out is open" : "");
+        gc.setFont(TextFit.fit(hdr, "Segoe UI", FontWeight.BOLD, 16, w - 40));
+        gc.fillText(hdr, w / 2, 66);
 
         double rowH = 56;
         double top = 86;
@@ -261,7 +263,7 @@ public final class StoreInterlude implements Interlude {
 
         if (flashT > 0) {
             gc.setTextAlign(TextAlignment.CENTER);
-            gc.setFont(Font.font("Consolas", FontWeight.BOLD, 15));
+            gc.setFont(TextFit.fit(flash, "Consolas", FontWeight.BOLD, 15, w - 40));
             gc.setFill(Color.web("#ff9ec7"));
             gc.fillText(flash, w / 2, h - 54);
         }
@@ -277,9 +279,10 @@ public final class StoreInterlude implements Interlude {
         gc.setFill(Color.web(afford ? baseHex : "#100c18", 0.92));
         gc.fillRoundRect(34, y, w - 68, rowH - 10, 12, 12);
         atlas.draw(gc, tile, 44, y + 4, 36);
-        gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 17));
+        String text = num + ".  " + label;
+        gc.setFont(TextFit.fit(text, "Segoe UI", FontWeight.BOLD, 17, w - 200)); // keep clear of the price
         gc.setFill(afford ? Color.web("#eaf4ea") : Color.web("#6c6478"));
-        gc.fillText(num + ".  " + label, 92, y + 29);
+        gc.fillText(text, 92, y + 29);
         gc.setTextAlign(TextAlignment.RIGHT);
         gc.setFill(afford ? Color.web("#ffd54a") : Color.web("#7a5a2a"));
         gc.fillText(price, w - 50, y + 29);

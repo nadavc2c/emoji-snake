@@ -106,7 +106,7 @@ public final class GlitchDirector {
             double jx = (rng.nextDouble() * 2 - 1) * 4;
             double jy = (rng.nextDouble() * 2 - 1) * 4;
             gc.setTextAlign(TextAlignment.CENTER);
-            gc.setFont(Font.font("Consolas", FontWeight.BOLD, 34));
+            gc.setFont(TextFit.fit(message, "Consolas", FontWeight.BOLD, 34, width - 40));
             gc.setGlobalBlendMode(BlendMode.DIFFERENCE);
             gc.setFill(Color.hsb(rng.nextInt(360), 1, 1));
             gc.fillText(message, width / 2.0 + jx, top + (height - top) * 0.32 + jy);
