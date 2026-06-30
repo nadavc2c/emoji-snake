@@ -22,9 +22,15 @@ public final class TextFit {
         if (s == null || s.isEmpty()) {
             return 0;
         }
-        Text t = new Text(s);
-        t.setFont(font);
-        return t.getLayoutBounds().getWidth();
+        try {
+            Text t = new Text(s);
+            t.setFont(font);
+            return t.getLayoutBounds().getWidth();
+        } catch (Throwable headless) {
+            // No graphics pipeline (truly headless CI): fall back to a rough monospace-ish estimate
+            // so wrap()/fit() still behave sanely and never throw.
+            return s.length() * font.getSize() * 0.6;
+        }
     }
 
     /** A font sized so {@code text} fits {@code maxWidth} (never larger than {@code baseSize}). */

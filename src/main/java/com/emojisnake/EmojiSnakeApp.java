@@ -526,6 +526,7 @@ public class EmojiSnakeApp extends Application {
     private void onKonami() {
         metaUnlocked = true;
         glitch.setMetaUnlocked(true);
+        applyMetaGameFlags(); // wake the gags mid-run too, not just the visuals
         lives = Math.min(maxLives(), lives + 1);
         game.applyStatus(StatusKind.GHOST, 220);
         toast("the code. of course.");
@@ -893,7 +894,7 @@ public class EmojiSnakeApp extends Application {
             case ESCAPE -> { Platform.exit(); return; }
             case OPEN_BRACKET -> { if (debug) intensity.nudgeCorruption(-0.1); return; }
             case CLOSE_BRACKET -> { if (debug) intensity.nudgeCorruption(0.1); return; }
-            case U -> { if (debug) { metaUnlocked = !metaUnlocked; glitch.setMetaUnlocked(metaUnlocked); } return; }
+            case U -> { if (debug) { metaUnlocked = !metaUnlocked; glitch.setMetaUnlocked(metaUnlocked); applyMetaGameFlags(); } return; }
             case G -> { if (debug && started && game.status() == GameState.Status.RUNNING) game.forceShed(); return; }
             case B -> {
                 if (debug && started && game.status() == GameState.Status.RUNNING) {
@@ -976,9 +977,16 @@ public class EmojiSnakeApp extends Application {
             countedThisGame = true;
             metaUnlocked = forceMeta || gamesPlayed > META_UNLOCK_GAMES;
             glitch.setMetaUnlocked(metaUnlocked);
+            applyMetaGameFlags(); // configure the gags ONCE per run (not on every revive/resume)
         }
-        // EVERYTHING beyond plain Snake is gated on the deranged layer being awake, so the first
-        // couple of runs are SUPER plain (no store, no gags, no eye-bleed) and the wake-up lands hard.
+    }
+
+    /**
+     * Turn the gameplay gags on/off to match {@code metaUnlocked}: EVERYTHING beyond plain Snake is
+     * gated here, so the first couple of runs are SUPER plain and the wake-up lands hard. Called once
+     * per run from {@link #beginRun}, and on the mid-run wake paths (Konami / debug {@code U}).
+     */
+    private void applyMetaGameFlags() {
         game.setMechanicsEnabled(metaUnlocked);   // power-ups, synergies, portals
         game.setGagsEnabled(metaUnlocked);        // the rare "shed body" gag
         game.setStoreEnabled(metaUnlocked);       // the on-board shop only exists once awake
