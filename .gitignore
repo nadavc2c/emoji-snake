@@ -1,0 +1,18 @@
+# Self-contained build sandbox: everything here lives inside the repo and can be deleted freely.
+# (git does not support trailing inline comments, so each note is on its own line.)
+
+# repo-local GRADLE_USER_HOME (Gradle distribution + JavaFX/JUnit caches)
+.gradle-home/
+# Gradle project metadata
+.gradle/
+# compiled classes, jars, snapshots, --play screenshots, playtest saves
+build/
+# jpackage app-image output + the distributable zip
+dist/
+# contingency: unpacked JavaFX SDK (fallback path)
+tools/
+
+# Runtime data: personal save files, never committed
+highscore.txt
+progress.txt
+meta.txt

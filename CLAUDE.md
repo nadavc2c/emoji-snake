@@ -1,0 +1,95 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Emoji Snake - classic Snake where every board cell is an OpenMoji color PNG tile, rendered on a JavaFX `Canvas`. Java 25 + JavaFX 25, built with Gradle (Kotlin DSL).
+
+## Self-contained sandbox (critical)
+
+This repo is a sandbox like a Python `venv`: **nothing installs globally**. All Gradle/JavaFX/JUnit downloads are redirected into the repo-local `.gradle-home/` via `GRADLE_USER_HOME`. **Every raw `gradlew` command must set this**, or it will pollute the user's home profile and defeat the design:
+
+```powershell
+# PowerShell - or just use the wrappers below which set this for you
+$env:GRADLE_USER_HOME = "$PWD\.gradle-home"
+.\gradlew.bat <task>
+```
+
+```bash
+./gradlew -g .gradle-home <task>     # Git Bash / macOS / Linux
+```
+
+## Commands
+
+```powershell
+.\run.ps1                 # run the game (sets GRADLE_USER_HOME, calls gradlew run)
+run.cmd                   # same, for cmd / double-click
+.\package.ps1             # build a distributable Windows app-image -> dist\emoji-snake-windows.zip
+                          #   (first-party jpackage only; -RegenIcon also rebuilds art\snake.ico)
+
+# These need GRADLE_USER_HOME set (see above) - or run via the wrappers:
+gradlew.bat test                                          # all tests (JUnit 5)
+gradlew.bat test --tests "com.emojisnake.GameStateTest.eatingFoodGrowsAndScores"   # one test
+gradlew.bat run --args="--snapshot"            # headless render self-check -> build/snapshot.png
+gradlew.bat run --args="--snapshot:corrupt"    # awakened high-corruption look -> build/snapshot-corrupt.png
+gradlew.bat run --args="--snapshot:start"      # the press-to-start screen -> build/snapshot-start.png
+gradlew.bat run --args="--snapshot:boss"       # the genre-shift boss dodge fight -> build/snapshot-boss.png
+gradlew.bat run --args="--snapshot:crash"      # the fake-crash illusion -> build/snapshot-crash.png
+gradlew.bat run --args="--snapshot:shed"       # the rare "shed body" gag -> build/snapshot-shed.png
+gradlew.bat run --args="--snapshot:vn"         # the slop AI visual-novel interlude -> build/snapshot-vn.png
+gradlew.bat run --args="--snapshot:store"      # the on-board power-up shop -> build/snapshot-store.png
+gradlew.bat run --args="--snapshot:slot"       # the slot-machine gamble interlude -> build/snapshot-slot.png
+gradlew.bat run --args="--smoke"               # headless: run the real loop+audio thread 150 frames, then exit
+gradlew.bat run --args="--play"                # headless SELF-PLAY: scripted scenarios drive the REAL gags/interludes,
+                                               #   assert state transitions, write build/play-*.png per beat, print a
+                                               #   PLAY REPORT, and exit non-zero on any failure (so it's CI-usable)
+gradlew.bat run --args="--play:slot"           #   run one scenario: food/powerup/shed/slot/book-open/book-win/book-death/
+                                               #   store-buy/store-exit/basilisk/fleeing/funny67/secret/descend/ending
+gradlew.bat run --args="--awake"               # skip the slow reveal: force the deranged roguelite layer on from frame 1
+gradlew.bat run --args="--debug"               # in-game: '[' / ']' nudge corruption; 'U' toggles meta; 'G' shed gag; 'B' visual novel; 'N' store; 'J' basilisk
+```
+
+There is no separate lint step. The Gradle wrapper pins Gradle 9.6.1; the toolchain pins JDK 25 (resolves to the JDK running Gradle - no download).
+
+**Distribution** (`jpackageImage` task / `package.ps1`): a self-contained Windows **app-image** built with the JDK's own `jpackage` (no third-party plugins). `installDist` lays out the app jar + JavaFX jars under `build/install/emoji-snake/lib`; `jpackage` wraps that + a trimmed JRE into `dist\Emoji Snake\` (then `package.ps1` zips it). JavaFX rides on the **classpath** (so launch goes through the non-`Application` `com.emojisnake.Launcher` to avoid the "JavaFX runtime components missing" guard); the bundled runtime is trimmed via `--add-modules` (must include `java.desktop` for Swing/`SwingFXUtils`/audio). The exe icon is the committed `art\snake.ico` (PNG-embedded 256² derived from the slop-generated `art\snake.png`).
+
+## Architecture
+
+The core split is **pure logic vs. JavaFX shell**, which is what makes the game unit-testable headlessly:
+
+- **`GameState`** - the entire simulation (grid, snake, food, time-limited bonus gem, obstacles, score, speed). No UI dependency. `tick()` advances one step and returns an `Event` (`MOVED`/`ATE_FOOD`/`ATE_BONUS`/`CRASHED`). Deterministic `GameState(cols, rows, seed)` constructor + package-private `forceFood(Point)` test hook. Turns are buffered in a **depth-2 queue** (validated against the last *queued* turn, so quick tap-tap U-turns both register). **Everything beyond classic Snake defaults to OFF** so the seeded constructor stays vanilla and the headless tests are unchanged - the app opts in via setters:
+  - *Forgiveness:* `revive()` is an **in-place** second chance - it keeps the snake's body / length / position / score exactly where it died, breaks the obstacle it ran into, and grants a brief grace (ghost + a `wallGraceTicks` wall-wrap window) so it can crawl free instead of instantly re-dying. Plus `setWrapUntilLevel()` (early walls wrap instead of kill), `setMercyRunsEnabled()` (1/3 gentler acceleration), speed "momentum" that decays when you stop eating, `setInitialDirection()` for press-to-start.
+  - *Roguelite (`setMechanicsEnabled`)*: power-up entities (`Element` → `StatusKind`), timed `statuses` (BURN/SLOW/GHOST/GOLD/MAGNET), eat-3-of-a-kind synergies, and `Portal` pairs. Rich side-events surface via `drainNotices()` (POWERUP/SYNERGY/PORTAL) without changing `tick()`'s return type. `tileAt` returns the varied food / dark obstacle / power-up / portal tiles. Seeded tests enable mechanics + use `forcePowerUp`/`forcePortals`/`grantStatus`/`addObstacle` hooks (`RoguelikeMechanicsTest`).
+  - *The "shed body" gag (`setGagsEnabled`)*: a rare event (`maybeTriggerShed` rolls `SHED_CHANCE` per tick once the snake is long enough) where the whole body freezes into lethal terrain (`tileAt` → 🪦, the neck → 🤑) and only the head keeps moving (`tickDetached`) - now as its **own growing snake**: it eats/grows (and can self-collide) while detached, and on reconnect it **keeps that growth** with the frozen body appended to its tail. Biting the still-living neck (`reconnectNode`) reassembles the snake. Surfaces SHED/RECONNECT via `drainNotices()`; `forceShed()` is the deterministic test/`--debug` hook (`ShedGagTest`).
+  - *The "bookworm" trigger (`setBooksEnabled`)*: a food respawn occasionally becomes a rare 📖 (`Tile.BOOK`, `BOOK_CHANCE`, guarded so disabled draws **zero** RNG - seeded tests untouched). Eating it grows/scores like food but also fires a `BOOK` notice via `drainNotices()`; the app turns that into the visual-novel interlude. `forceBook(Point)` is the deterministic test/`--debug` (`B`) hook (`BookTest`).
+  - *More gags (all flag-gated, OFF by default → zero RNG when disabled; `ChaosGagsTest`)*: **fleeing food** (`setFleeingFoodEnabled`) - the anti-magnet: food bolts one cell away when the head is adjacent, a random capped number of times, then gives up (`FLEE` notice; `forceFoodFlees`). **On-board store** (`setStoreEnabled`) - a permanent 🏪 (`Tile.STORE`, spawns at `STORE_MIN_LEVEL`); bumping it is non-lethal and fires a `STORE` notice (the app opens `StoreInterlude`); `forceStore`. **Basilisk** (`setBasiliskEnabled`) - eating 🍖 can turn the head into 🐔 and food into 🐍 (`tileAt`) until the 🥚 cure is eaten (`BASILISK`/`CURE` notices; `forceBasilisk`, `--debug` `J`). **Escalating chaos**: `chaosScale()` grows with `level()` and multiplies the shed/book/basilisk odds (more chaos the further you get).
+
+- **`EmojiSnakeApp`** - the JavaFX `Application`. An `AnimationTimer` **accumulator loop** decouples render rate from game-step rate: it accumulates real elapsed nanos and calls `step()` every `game.delayMillis()` (which shrinks as the snake eats, so the game speeds up without changing the render loop). Owns the "crazy layer" wiring (camera/particles/effect chain/intensity), key handling, and high-score persistence. In-play messages (`toast`) linger `TOAST_SECONDS`, and crossing a comedic score (`FUNNY_SCORES` - 67/69/420/…) fires an emoji-themed gag (`checkFunnyScore`). `stop()` closes the audio engine. Supports `--snapshot[:corrupt]` (one-frame PNG self-check, snapshots the render **root group** so node effects are captured), `--smoke` (run the real loop+audio briefly, then exit), and `--debug` (corruption nudge keys).
+
+### The "crazy layer" (eye-bleed edition)
+Built on JDK + OpenJFX only (no new deps). The spine is **`IntensityModel`** → an immutable **`IntensitySnapshot`** (`intensity` = short-term speed/combo; `corruption` = long-term escalation). Visuals + audio both subscribe to it. `GameState` stays pure (the existing 8 tests are untouched); it only gained an additive `speedFraction()`. Full roadmap: `.claude/plans/we-gonna-make-it-fizzy-pixel.md`.
+
+- **`com.emojisnake.audio`** - runtime chiptune, no audio files. `AudioEngine` streams PCM to one `SourceDataLine` on a **daemon thread**; the game thread hands it intensity via an `AtomicReference` and SFX via a bounded queue (both lock-free; fails silent with no mixer). `Mixer`/`Voice`/`Envelope`/`Waveform` are pure DSP (unit-tested in `SynthTest`); `Sequencer` generates adaptive music (tempo/layers from intensity, detune/distortion from corruption). **Per-context music** via `MusicScene` (set lock-free through `SoundManager.setScene` → `AudioEngine` → `Sequencer`): `NORMAL` is the adaptive groove; the takeover scenes each play a recognizable **public-domain classical** melody as note data through the same synth (still no audio files) - `BOSS`=Dies Irae, `SHOP`=Für Elise, `VN`=Pachelbel's Canon, `SECRET`=whole-tone descent, `ENDING`=Ode to Joy. The app picks the scene with `sceneFor(interlude)` in the loop (and `NORMAL` during play); `SequencerSceneTest` asserts each scene is audible headlessly. `SoundManager` is a thin facade over this, keeping its old API.
+- **`com.emojisnake.fx`** - `RenderLayers` (a `content` Group of bg/trail/entity canvases that carries the effect chain and camera, plus an `overlay` canvas **outside** the effect for CRT/wash/aberration/glitch/text so Bloom doesn't re-bloom them), `Camera` (trauma shake + transient zoom; identity at rest so edge tiles aren't cropped), `ParticleSystem` (additive bursts), `CrtOverlay` (pre-rendered scanlines+vignette), `Easings`/`Tween`. `FxDirector` owns the node-effect chain (`ColorAdjust` hue/sat → gated `DisplacementMap` warp → `MotionBlur` → `Bloom`) and the **gated** chromatic-aberration pass (snapshots content - the perf trap - so it only fires at high corruption, throttled every other frame). `GlitchDirector` renders corruption-driven glitch bursts (inverted/neon bands), self-aware hostile text, and HUD garble/jitter - all in-window illusions. Calibrated **medium-high, not maxed** (peer-reviewed juice inverted-U). The broader `MetaDirector` that triggers genre-shift *modes* arrives with the mode system (Phase 4).
+
+- **`com.emojisnake.mode`** - lightweight takeover interludes (a stand-in for a full mode stack): `Interlude` interface + `DodgeBossInterlude` (the genre-shift bullet-hell boss, triggered every `BOSS_EVERY_LEVELS` once meta is awake), `FakeCrashInterlude` (the in-window fake fatal-error illusion), `VisualNovelInterlude` (the rare "slop AI visual novel" - see below), `StoreInterlude` (the on-board power-up shop; buy with score, leave on a chosen direction - plus a costly "back room" that opens the secret and a 999-pt "TRUE ENDING" red herring that does nothing, à la Frog Fractions), `SlotInterlude` (the 🎰 gamble - animated spinning reels that pay out random length via `addPendingGrowth`), `SecretInterlude` (the Frog-Fractions ↓↓↓ secret - a hinted, in-window genre-shift gag), and `KonamiDetector` (the ↑↑↓↓←→←→BA secret). While an interlude is active the app suspends the normal Snake loop, delegates update/render/input to it, and resumes on `isDone()` (reading the concrete result, e.g. `boss.hits()` / `vn.died()` / `store.exitDirection()`, in `finishInterlude`). The app also has a non-interlude **window-shrink** gag (rarely, eating squeezes the whole `Stage` down for a few seconds, then restores).
+
+- **`com.emojisnake.vn` + `VisualNovelInterlude` + `VnArt`** - the "slop AI visual novel" gag: eating a 📖 (once meta is awake) opens a short branching **snake/emoji dating-sim parody** set at a predatory all-snake law firm (Cruelty-Squad tone). The clichés are played straight - senpai, rival-to-lover, the wholesome childhood-friend intern, love meter - then twisted: **morality is INVERTED - kind/honest/charitable choices are the lethal BAD ENDs; ruthless capitalist choices win the route.** The **pure, headlessly-testable** model lives in `com.emojisnake.vn` (`Choice`/`StoryNode`/`Story`+builder/`StoryState`; the 5 novels are data in `VisualNovels.all()`; `VisualNovelTest`). A choice targets a node id, or a terminal node whose `lethal()` flag is set - a **lethal ending costs a life** (resolved in `finishInterlude` via the boss life-loss path; not `revive()`, which only works from `GAME_OVER`; shows a clear "BAD END"). `VisualNovelInterlude` (in `mode`) renders it: a **transparent character sprite** composited over a background, a readable bottom dialogue box (typewriter, **no garble** - eye-bleed lives in the surrounds: hue-cycling neon border, scanlines, meta glitch bands, a love-meter header), and choice select; calm music bed (low intensity while a VN is active). **`VnArt` is a *lenient* loader** of `/vn/` assets (missing files fall back to a drawn placeholder panel - unlike `EmojiAtlas`, a missing VN asset never crashes). The art is generated by the user's local `slop` CLI: **FLUX.2** character portraits + backgrounds, cut to transparent RGBA with **BiRefNet** via `slop matte` (current-best models only; never SDXL/legacy) - bundled under `src/main/resources/vn/`. Snapshot: `--snapshot:vn`; debug: `B`.
+
+- **`EmojiAtlas` + `Tile`** - `Tile` is an enum mapping each cell kind to a bundled PNG named by Unicode code point (`/emoji/<codepoint>.png`); now includes varied food, dark obstacles (🪦💀), power-up elements, portal, boss, and projectile tiles (`Tile.randomFood`/`obstacleAt` pick variants). `EmojiAtlas` loads them once and draws them as **images, not font glyphs** - Java desktop toolkits often render emoji as monochrome outlines; bundled OpenMoji PNGs guarantee color. Adding a tile = add the enum entry **and** drop the `<codepoint>.png` in `src/main/resources/emoji/` (the constructor throws if missing) **and** note it in `ATTRIBUTION.md`.
+
+- **`SoundManager`** - thin facade over `com.emojisnake.audio.AudioEngine` (see the crazy-layer section). Keeps its original API (`eat/bonus/crash/toggle/isEnabled`) plus `start()`, `setIntensity()`, `close()`. Still **fails silent** on headless/no-mixer machines.
+
+- **`HighScoreStore`** / **`ProgressStore`** / **`MetaStore`** - persist best score (`highscore.txt`), games-played (`progress.txt`) and the **roguelite meta-progression** (`meta.txt`: `rank` = back-room floors descended, `maxLifeBonus` = permanent +max-life upgrades, `ended` = beat the game) in the **working directory** (not user home). All three obfuscate their contents via **`SaveCodec`** (XOR+Base64 body + a truncated keyed digest) so the files are opaque and **tamper-evident** - an edited save fails the digest and is ignored; each store keeps a legacy plain-text read fallback so old saves migrate on the next write. `ProgressStore` drives the **slow reveal**: the first `META_UNLOCK_GAMES` (2) runs play straight - forgiving, neon, silent - then the deranged "smartass" layer (taunts, fake deaths, glitches) wakes up and escalates (or `--awake` / `forceMeta` forces it on). The voice is deliberately **dark / cruel / depressive-funny** (Undertale inverted). The app gates this via `EmojiSnakeApp.metaUnlocked` → `GlitchDirector.setMetaUnlocked` and the `onCrash()` death flow (lives + ~1/3 meta-gated "fake death" revives). All stores fail silent.
+
+- **Roguelite meta-progression (Dead-Cells-style, "the game goes somewhere")** - currency is your run **score**, but some purchases **stick across runs** (persisted in `MetaStore`). The on-board store's "Forever" shelf sells **VESTED LIFE** (permanent +1 `maxLives()`, capped at `MAX_LIFE_BONUS`=2; base `BASE_MAX_LIVES`=3), **THE BACK ROOM** (descend one persistent floor, rising price; opens a floor-specific `SecretInterlude(floor, maxFloors)` chapter), and the **TRUE ENDING** (a red-herring tease until **both** all `MAX_FLOORS`=5 floors are cleared **and** all 5 visual novels have been finished - `meta.vnDone` - then the real **"become the firm"** finale → `EndingInterlude`, rendered over the slop-generated CEO-snake portrait `/vn/bg/ending.png`). A run never repeats a novel until it has cycled all 5 (`pickNovel` + `vnSeenThisRun`); finishing any novel (any ending) marks it read in `MetaStore`. The HUD shows `Floor X/5`. `finishInterlude` applies + persists each meta purchase; `--play` covers it with `descend`/`ending` scenarios (the harness redirects all three stores to a temp dir so self-test never touches real saves).
+
+- **`Point` / `Direction`** - immutable record + enum with grid deltas; the geometry primitives.
+
+## Conventions & gotchas
+
+- Adding a tile kind = add a `Tile` enum entry **and** drop the matching `<codepoint>.png` into `src/main/resources/emoji/`. `EmojiAtlas`'s constructor throws if an asset is missing.
+- Bundled emoji are OpenMoji (CC BY-SA 4.0) - see `src/main/resources/ATTRIBUTION.md` when adding assets.
+- Keep game-rule changes in `GameState` (and cover them in `GameStateTest`); keep them out of `EmojiSnakeApp` so the logic stays headlessly testable.
+- **Testing the app/gag wiring** (notice→interlude→reward/lives/exit, soft-locks): the interludes are render-only-coupled to JavaFX, so their logic is unit-tested directly with a `null` atlas/art (`src/test/java/com/emojisnake/mode/*Test.java`), and the end-to-end wiring is covered by the `--play` self-play harness in `EmojiSnakeApp` (scripted scenarios drive the real `step`/`onNotice`/`finishInterlude`, assert, and snapshot). Run `--play` after any change to interlude/notice wiring - it caught the store/slot exit-turn being wiped by `stopGrace()`.
