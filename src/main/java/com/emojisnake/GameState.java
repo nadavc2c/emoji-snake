@@ -76,8 +76,11 @@ public final class GameState {
     // On-board store: a permanent 🏪 you bump into to buy power-ups. Appears once the firm's awake.
     private static final int STORE_MIN_LEVEL = 2;
 
-    // Gaslight gag tuning: a wall drops two cells ahead (~0.2s at high speed), rarely, with a cooldown.
-    private static final double GASLIGHT_CHANCE = 0.05;
+    // Gaslight gag tuning: a wall drops two cells ahead (~0.2s at high speed). The chance ramps with
+    // how far past the threshold you are, so a high score gets walls in your face often, with a cooldown.
+    private static final double GASLIGHT_BASE_CHANCE = 0.06;
+    private static final double GASLIGHT_RAMP = 0.012; // per point over the threshold
+    private static final double GASLIGHT_MAX_CHANCE = 0.6;
     private static final int GASLIGHT_COOLDOWN = 45;
 
     // Basilisk gag: eating roasted chicken can turn the head into a chicken 🐔 (a cockatrice), the
@@ -596,7 +599,9 @@ public final class GameState {
             gaslightCooldown--;
             return;
         }
-        if (rng.nextDouble() >= GASLIGHT_CHANCE) {
+        double chance = Math.min(GASLIGHT_MAX_CHANCE,
+                GASLIGHT_BASE_CHANCE + (score - gaslightThreshold) * GASLIGHT_RAMP);
+        if (rng.nextDouble() >= chance) {
             return;
         }
         Point head = snake.peekFirst();

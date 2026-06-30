@@ -12,7 +12,8 @@ dist/
 # contingency: unpacked JavaFX SDK (fallback path)
 tools/
 
-# Runtime data: personal save files, never committed
+# Runtime data: the single save file (and the old split files it migrates from), never committed
+save.dat
 highscore.txt
 progress.txt
 meta.txt

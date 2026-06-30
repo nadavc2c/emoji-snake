@@ -59,7 +59,7 @@ it's game over - usually. Your best score is saved. There may also be a secret. 
   ringed in green) to pull yourself back together.
 - **The slow reveal** - the first couple of runs play it straight. Then the game starts *talking*
   (dark, cruel, depressive-funny), glitching, and faking your death. All illusions - it never
-  touches a single real file beyond its own score files.
+  touches a single real file beyond its own save file.
 - **Forgiving on purpose** - press-to-start, 3 lives, gentle/decaying speed, a 1-in-3 "merciful
   run", early walls that wrap, and fake deaths that hand you back. The derangement *is* the mercy.
 
@@ -106,8 +106,8 @@ This project is a sandbox, like a Python `venv` but for Java:
 - **All downloads stay in the repo.** `GRADLE_USER_HOME` is redirected to a repo-local
   `.gradle-home/` (the run scripts do this for you), so Gradle itself, JavaFX, and JUnit
   are cached *inside this folder* - never in your user profile.
-- Score + progress save to `highscore.txt` / `progress.txt` / `meta.txt` **here**, not in your
-  home directory (lightly obfuscated so they're not trivially editable).
+- All progress saves to a single `save.dat` **here**, not in your home directory (obfuscated +
+  tamper-evident). Delete that one file to start completely fresh.
 - **Deleting this folder removes 100% of the footprint.** (The only out-of-repo touch is
   transient OS-temp extraction of JavaFX native libraries, which the OS cleans up.)
 

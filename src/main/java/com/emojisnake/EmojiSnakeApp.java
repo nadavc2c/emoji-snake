@@ -101,10 +101,8 @@ public class EmojiSnakeApp extends Application {
 
     private final EmojiAtlas atlas = new EmojiAtlas();
     private final SoundManager sound = new SoundManager();
-    private HighScoreStore highScoreStore = new HighScoreStore(); // non-final: --play redirects to temp
-    private ProgressStore progressStore = new ProgressStore();
-    private MetaStore metaStore = new MetaStore();
-    private MetaStore.Meta meta = new MetaStore.Meta(0, 0, false); // persistent roguelite progression
+    private SaveStore saveStore = new SaveStore(); // single save file; non-final so --play redirects to temp
+    private SaveStore.Save meta = new SaveStore.Save(0, 0, false); // all persistent state
     private final IntensityModel intensity = new IntensityModel();
     private final ParticleSystem particles = new ParticleSystem();
     private final Camera camera = new Camera();
@@ -173,7 +171,8 @@ public class EmojiSnakeApp extends Application {
         crt = new CrtOverlay(WIDTH, HEIGHT);
         fx = new FxDirector(layers.content(), WIDTH, HEIGHT);
         glitch = new GlitchDirector(WIDTH, HEIGHT, HUD_HEIGHT);
-        highScore = highScoreStore.load();
+        meta = saveStore.load();        // one file holds everything (high score, progress, meta)
+        highScore = meta.highScore();   // mirror into the live field used by the HUD / snapshots
 
         if (snapshotArg != null) {
             renderSnapshotAndExit(snapshotArg);
@@ -186,8 +185,7 @@ public class EmojiSnakeApp extends Application {
             return;
         }
 
-        gamesPlayed = progressStore.loadGamesPlayed();
-        meta = metaStore.load();   // persistent roguelite progression (floors descended, +life upgrades)
+        gamesPlayed = meta.gamesPlayed(); // (meta was loaded above; the snapshot/play paths returned early)
         lives = maxLives();
         startQuote = pick(QUOTES);
         game = new GameState(COLS, ROWS);
@@ -205,7 +203,7 @@ public class EmojiSnakeApp extends Application {
         scene.setOnKeyPressed(e -> handleKey(e.getCode()));
 
         this.stage = stage; // kept for the window-shrink gag
-        stage.setTitle("🐍 Emoji Snake - eye-bleed edition");
+        updateTitle(); // plain "Emoji Snake" until the deranged layer wakes, then the full title
         var iconStream = EmojiSnakeApp.class.getResourceAsStream("/icon.png");
         if (iconStream != null) {
             stage.getIcons().add(new Image(iconStream));
@@ -365,7 +363,7 @@ public class EmojiSnakeApp extends Application {
             String novelId = vn.story().id();
             if (!meta.vnDone().contains(novelId)) {
                 meta = meta.withVnDone(novelId);
-                metaStore.save(meta);
+                persist();
             }
             // A wrong choice in the novel kills you - spend a life via the same path as the boss
             // (revive() only works from GAME_OVER, so we adjust lives directly here).
@@ -389,19 +387,19 @@ public class EmojiSnakeApp extends Application {
             // Apply any permanent +max-life upgrades bought this visit (persisted across runs).
             if (store.livesBought() > 0) {
                 meta = meta.withMaxLifeBonus(Math.min(MAX_LIFE_BONUS, meta.maxLifeBonus() + store.livesBought()));
-                metaStore.save(meta);
+                persist();
                 lives = Math.min(maxLives(), lives + store.livesBought());
             }
             if (store.boughtEnding()) {
                 meta = meta.withEnded(true); // cleared every floor + bought the way out
-                metaStore.save(meta);
+                persist();
                 interlude = new EndingInterlude(vnArt); // the "become the firm" finale
                 return;
             }
             if (store.boughtSecret()) {
                 int floor = Math.min(MAX_FLOORS, meta.rank() + 1); // descend one persistent floor
                 meta = meta.withRank(floor);
-                metaStore.save(meta);
+                persist();
                 Direction safe = safeStoreExit(); // pre-set a safe heading so the post-chapter prompt
                 if (safe != null) {               // can't resume back into the wedged-against shop
                     game.setInitialDirection(safe);
@@ -480,6 +478,12 @@ public class EmojiSnakeApp extends Application {
     /** Current life cap: base plus any permanent VESTED LIFE upgrades banked across runs. */
     private int maxLives() {
         return BASE_MAX_LIVES + meta.maxLifeBonus();
+    }
+
+    /** Write the whole save (high score, progress, meta) to the single save file. */
+    private void persist() {
+        meta = meta.withHighScore(highScore).withGamesPlayed(gamesPlayed);
+        saveStore.save(meta);
     }
 
     /** Pick a novel not yet seen this run, so a single run never repeats one until all 5 are cycled. */
@@ -837,8 +841,8 @@ public class EmojiSnakeApp extends Application {
         if (game.score() > highScore) {
             highScore = game.score();
             newBest = true;
-            highScoreStore.save(highScore);
         }
+        persist(); // one file: high score + games-played + meta all written together
     }
 
     private void showMercy(String msg) {
@@ -973,7 +977,7 @@ public class EmojiSnakeApp extends Application {
         game.setInitialDirection(d); // open in any direction, no reversal guard
         if (!countedThisGame) {
             gamesPlayed++;
-            progressStore.saveGamesPlayed(gamesPlayed);
+            persist();
             countedThisGame = true;
             metaUnlocked = forceMeta || gamesPlayed > META_UNLOCK_GAMES;
             glitch.setMetaUnlocked(metaUnlocked);
@@ -994,7 +998,17 @@ public class EmojiSnakeApp extends Application {
         game.setFleeingFoodEnabled(metaUnlocked); // food bolts when you crowd it
         game.setBasiliskEnabled(metaUnlocked);    // roasted chicken can hatch the cockatrice
         game.setGambleEnabled(metaUnlocked);      // a food can be a 🎰 slot machine
-        game.setGaslightEnabled(metaUnlocked);    // rarely drop a wall right ahead of you (the gaslight)
+        // The gaslight is ONLY for the plain pre-wake games: it caps a too-long plain run (walls in
+        // your face burn your lives) to push you to the wake-up. Once awake, the chaos does that job.
+        game.setGaslightEnabled(!metaUnlocked);
+        updateTitle(); // the title hint ("eye-bleed edition") only appears once it's awake
+    }
+
+    /** Window title: plain for the pre-wake runs (no "eye-bleed" hint), full once the meta is awake. */
+    private void updateTitle() {
+        if (stage != null) {
+            stage.setTitle(metaUnlocked ? "🐍 Emoji Snake - eye-bleed edition" : "🐍 Emoji Snake");
+        }
     }
 
     /** Steer an already-moving snake (turns are buffered in {@link GameState}'s queue). */
@@ -1540,9 +1554,9 @@ public class EmojiSnakeApp extends Application {
         sound.toggle(); // keep the self-play silent
         metaUnlocked = true;
         glitch.setMetaUnlocked(true);
-        // Never pollute the player's real save files from the self-test: redirect the stores to a
-        // throwaway dir. Try the system temp dir, but always fall back to build/playtest (under the
-        // gradle build dir) so a persisting scenario can never clobber the real highscore/progress/meta.
+        // Never pollute the player's real save from the self-test: redirect the store to a throwaway
+        // dir. Try the system temp dir, but always fall back to build/playtest so a persisting scenario
+        // can never clobber the real save.dat.
         java.nio.file.Path sink = java.nio.file.Path.of("build", "playtest");
         try {
             java.nio.file.Path tmp = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "emoji-snake-playtest");
@@ -1555,9 +1569,7 @@ public class EmojiSnakeApp extends Application {
                 // fall through with the relative path; worst case the saves fail silently (still not real)
             }
         }
-        highScoreStore = new HighScoreStore(sink.resolve("highscore.txt"));
-        progressStore = new ProgressStore(sink.resolve("progress.txt"));
-        metaStore = new MetaStore(sink.resolve("meta.txt"));
+        saveStore = new SaveStore(sink.resolve("save.dat"));
 
         runOne(only, "food", this::playFood);
         runOne(only, "powerup", this::playPowerup);
@@ -1885,7 +1897,7 @@ public class EmojiSnakeApp extends Application {
 
     private void playDescend() {
         beginPlay(5L);
-        meta = new MetaStore.Meta(0, 0, false); // start at floor 0
+        meta = new SaveStore.Save(0, 0, false); // start at floor 0
         game.addScore(50);
         game.forceStore(ahead());
         step(); // store opens via the STORE notice
@@ -1916,7 +1928,7 @@ public class EmojiSnakeApp extends Application {
 
     private void playEndingBlockedUntilNovelsRead() {
         beginPlay(5L);
-        meta = new MetaStore.Meta(MAX_FLOORS, 0, false); // all floors, but NO novels read yet
+        meta = new SaveStore.Save(MAX_FLOORS, 0, false); // all floors, but NO novels read yet
         game.addScore(400);
         game.forceStore(ahead());
         step();
@@ -1933,7 +1945,7 @@ public class EmojiSnakeApp extends Application {
         for (com.emojisnake.vn.Story s : VisualNovels.all()) {
             allVn.add(s.id());
         }
-        meta = new MetaStore.Meta(MAX_FLOORS, 0, false, allVn);
+        meta = new SaveStore.Save(MAX_FLOORS, 0, false, allVn);
         game.addScore(400);
         game.forceStore(ahead());
         step();
