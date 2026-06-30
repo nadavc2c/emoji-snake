@@ -58,8 +58,8 @@ class ShedGagTest {
 
         assertFalse(g.isDetached(), "biting the neck ends the gag");
         assertSame(GameState.Status.RUNNING, g.status());
-        assertEquals(new Point(12, 10), g.snakeBody().get(0), "the head lands where the neck was");
-        assertEquals(before, g.length(), "the frozen body reattaches to the (un-grown) lone head");
+        assertEquals(new Point(12, 9), g.snakeBody().get(0), "the head stays one cell off the neck it bit");
+        assertEquals(before, g.length(), "the original body reattaches behind the head (no length lost)");
         assertTrue(g.drainNotices().stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.RECONNECT),
                 "a RECONNECT notice fires for the reward juice");
         assertSame(GameState.Event.MOVED, e);
@@ -121,8 +121,10 @@ class ShedGagTest {
         g.tick();                               // (12,10) == neck -> reassemble
 
         assertFalse(g.isDetached(), "reconnected");
-        // grew by 1 while detached, so the reunion length exceeds the original by that growth.
-        assertEquals(before + 1, g.length(), "kept the detached growth and appended the frozen body");
+        // The original body is restored immediately; the +1 earned while detached is pending growth.
+        assertEquals(before, g.length(), "original body restored at once (growth is pending on the tail)");
+        g.tick();                               // one move flushes the pending growth onto the tail
+        assertEquals(before + 1, g.length(), "the detached growth is added cleanly to the tail");
     }
 
     @Test

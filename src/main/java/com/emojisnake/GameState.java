@@ -76,6 +76,10 @@ public final class GameState {
     // On-board store: a permanent 🏪 you bump into to buy power-ups. Appears once the firm's awake.
     private static final int STORE_MIN_LEVEL = 2;
 
+    // Gaslight gag tuning: a wall drops two cells ahead (~0.2s at high speed), rarely, with a cooldown.
+    private static final double GASLIGHT_CHANCE = 0.05;
+    private static final int GASLIGHT_COOLDOWN = 45;
+
     // Basilisk gag: eating roasted chicken can turn the head into a chicken 🐔 (a cockatrice), the
     // food into snakes 🐍, until an egg 🥚 is eaten. Off by default.
     private static final double BASILISK_CHANCE = 0.2; // per roasted-chicken eaten, once eligible
@@ -115,6 +119,12 @@ public final class GameState {
     private boolean basiliskEnabled;
     private boolean basilisk;
     private Point egg;              // nullable cure, present only while basilisk
+
+    // Gaslight gag (default off): past a per-run score threshold, rarely drop a wall right ahead of
+    // the head with almost no time to react (the revive then breaks it, so it "vanishes").
+    private boolean gaslightEnabled;
+    private int gaslightThreshold; // per-run, rolled 40..45 when enabled
+    private int gaslightCooldown;
 
     private int score;
     private int foodEaten;
@@ -223,6 +233,14 @@ public final class GameState {
     public void setFleeingFoodEnabled(boolean enabled) { this.fleeingFoodEnabled = enabled; }
     public void setStoreEnabled(boolean enabled) { this.storeEnabled = enabled; }
     public void setBasiliskEnabled(boolean enabled) { this.basiliskEnabled = enabled; }
+
+    /** Enable the gaslight wall and roll this run's score threshold (40..45). */
+    public void setGaslightEnabled(boolean enabled) {
+        this.gaslightEnabled = enabled;
+        if (enabled) {
+            this.gaslightThreshold = 40 + rng.nextInt(6);
+        }
+    }
     public void setGambleEnabled(boolean enabled) { this.gambleEnabled = enabled; }
 
     /** Owe the snake {@code n} extra segments, grown one per tick (the slot-machine payout). */
@@ -327,6 +345,7 @@ public final class GameState {
         if (basilisk && egg == null) {
             egg = randomFreeCell(); // re-attempt the cure if the board was full when it transformed
         }
+        maybeGaslight(); // rarely, drop a wall two cells ahead with almost no time to react
 
         Point head = snake.peekFirst();
         maybeFleeFood(head); // the worm bolts if you're right on top of it (anti-magnet)
@@ -565,6 +584,30 @@ public final class GameState {
     }
 
     /**
+     * The gaslight: once you're past this run's threshold, rarely drop a wall two cells dead ahead -
+     * almost no time to react. When you hit it, {@link #revive()} breaks that very obstacle, so it
+     * "vanishes" and you're left wondering if it was ever there.
+     */
+    private void maybeGaslight() {
+        if (!gaslightEnabled || score < gaslightThreshold) {
+            return;
+        }
+        if (gaslightCooldown > 0) {
+            gaslightCooldown--;
+            return;
+        }
+        if (rng.nextDouble() >= GASLIGHT_CHANCE) {
+            return;
+        }
+        Point head = snake.peekFirst();
+        Point spot = new Point(head.x() + direction.dx() * 2, head.y() + direction.dy() * 2);
+        if (isFreeForFood(spot) && !spot.equals(food)) {
+            obstacles.add(spot);
+            gaslightCooldown = GASLIGHT_COOLDOWN;
+        }
+    }
+
+    /**
      * Anti-magnet: if the head is right next to the food, the food bolts one cell directly away - but
      * only while it has flees left (then it gives up and lets itself be caught). Skipped under MAGNET.
      */
@@ -797,19 +840,34 @@ public final class GameState {
     }
 
     /**
-     * Reassemble: the (possibly grown) lone snake bites the neck - its head moves onto the neck, it
-     * keeps everything it ate while detached, and the frozen original body is appended at its tail.
+     * Reassemble: the lone head (sitting one cell off the neck) snaps back onto the ORIGINAL straight
+     * body, and the length it earned while detached is added cleanly to the TAIL (via pendingGrowth, so
+     * it extends out as the snake moves) rather than leaving the wandering detached path kinked into
+     * the body at a weird angle.
      */
     private void reattach(Point neck) {
-        snake.addFirst(neck);   // the head bites onto the neck
-        snakeCells.add(neck);
-        for (Point p : frozenBody) {
-            if (snakeCells.add(p)) { // append the frozen body at the tail (skip the neck, already there)
+        Point head = snake.peekFirst();           // the detached head, currently adjacent to the neck
+        int grew = Math.max(0, snake.size() - 1); // length earned while detached (it left as length 1)
+        snake.clear();
+        snakeCells.clear();
+        snake.addLast(head);                      // keep the head where it is...
+        snakeCells.add(head);
+        for (Point p : frozenBody) {              // ...and restore the original straight body behind it
+            if (snakeCells.add(p)) {
                 snake.addLast(p);
             }
         }
-        // A brief grace so the seam between the wandering snake and the re-attached body can't insta-kill.
-        statuses.merge(StatusKind.GHOST, REVIVE_GRACE_TICKS, Math::max);
+        pendingGrowth += grew;                    // earned length grows out from the tail as it moves
+        // Face forward, away from the neck, so the reattached body trails behind (no instant self-bite).
+        int dx = Integer.signum(head.x() - neck.x());
+        int dy = Integer.signum(head.y() - neck.y());
+        for (Direction d : Direction.values()) {
+            if (d.dx() == dx && d.dy() == dy) {
+                direction = d;
+                break;
+            }
+        }
+        statuses.merge(StatusKind.GHOST, REVIVE_GRACE_TICKS, Math::max); // brief grace at the seam
         wallGraceTicks = REVIVE_GRACE_TICKS;
         turnQueue.clear();
         frozenBody.clear();
@@ -969,6 +1027,15 @@ public final class GameState {
 
     /** Place the store at a cell (tests + debug). */
     void forceStore(Point p) { this.store = p; }
+
+    /** Test/debug hook: drop the gaslight wall two cells dead ahead of the head right now. */
+    void forceGaslight() {
+        Point head = snake.peekFirst();
+        Point spot = new Point(head.x() + direction.dx() * 2, head.y() + direction.dy() * 2);
+        if (isFreeForFood(spot) && !spot.equals(food)) {
+            obstacles.add(spot);
+        }
+    }
 
     /** Set how many times the current food will flee (tests). */
     void forceFoodFlees(int n) { this.foodFleesLeft = n; }

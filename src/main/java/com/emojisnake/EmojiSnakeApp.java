@@ -192,9 +192,8 @@ public class EmojiSnakeApp extends Application {
         game = new GameState(COLS, ROWS);
         game.setMercyRunsEnabled(true);
         game.setWrapUntilLevel(WRAP_UNTIL_LEVEL);
-        game.setMechanicsEnabled(true); // power-ups, synergies, portals
-        game.setGagsEnabled(true);      // the rare "shed body" gag
-        game.setStoreEnabled(true);     // the on-board shop (appears at level 2)
+        // Mechanics/gags/store are NOT turned on here: beginRun() enables them only once the meta
+        // layer is awake, so the first couple of runs are pure, plain classic Snake.
         game.reset(); // re-roll the merciful-run dice now that forgiveness is configured
         if (forceMeta) {
             metaUnlocked = true;
@@ -285,17 +284,25 @@ public class EmojiSnakeApp extends Application {
                 IntensitySnapshot snap = intensity.snapshot();
                 sound.setScene(MusicScene.NORMAL); // back to the adaptive groove during play
                 sound.setIntensity(snap);
-                IntensitySnapshot vis = calm ? snap.tamed() : snap; // calm mode tames the visuals
-
                 particles.update(dt);
-                camera.update(dt, vis.intensity());
-                camera.apply(layers.content()); // shake the board; CRT overlay stays steady
                 headPop.update(dt);
-                glitch.update(vis, dt);
 
-                huePhase += dt * (0.25 + vis.corruption() * 1.8 + vis.intensity() * 0.6);
-                fx.update(vis, huePhase, game.direction());
-                render(vis);
+                if (!metaUnlocked) {
+                    // SUPER PLAIN: the first runs are pure classic Snake. No effect chain, no shake,
+                    // no glitch, no CRT bloom - render() / drawOverlay skip all of it when meta is off.
+                    layers.content().setEffect(null);
+                    camera.reset();
+                    camera.apply(layers.content()); // identity transform -> steady board
+                    render(IntensitySnapshot.CALM);
+                } else {
+                    IntensitySnapshot vis = calm ? snap.tamed() : snap; // calm mode tames the visuals
+                    camera.update(dt, vis.intensity());
+                    camera.apply(layers.content()); // shake the board; CRT overlay stays steady
+                    glitch.update(vis, dt);
+                    huePhase += dt * (0.25 + vis.corruption() * 1.8 + vis.intensity() * 0.6);
+                    fx.update(vis, huePhase, game.direction());
+                    render(vis);
+                }
             }
         }.start();
     }
@@ -969,11 +976,16 @@ public class EmojiSnakeApp extends Application {
             metaUnlocked = forceMeta || gamesPlayed > META_UNLOCK_GAMES;
             glitch.setMetaUnlocked(metaUnlocked);
         }
-        // Rare gags escalate once the deranged layer is awake (like the boss/fake-crash).
+        // EVERYTHING beyond plain Snake is gated on the deranged layer being awake, so the first
+        // couple of runs are SUPER plain (no store, no gags, no eye-bleed) and the wake-up lands hard.
+        game.setMechanicsEnabled(metaUnlocked);   // power-ups, synergies, portals
+        game.setGagsEnabled(metaUnlocked);        // the rare "shed body" gag
+        game.setStoreEnabled(metaUnlocked);       // the on-board shop only exists once awake
         game.setBooksEnabled(metaUnlocked);
         game.setFleeingFoodEnabled(metaUnlocked); // food bolts when you crowd it
         game.setBasiliskEnabled(metaUnlocked);    // roasted chicken can hatch the cockatrice
         game.setGambleEnabled(metaUnlocked);      // a food can be a 🎰 slot machine
+        game.setGaslightEnabled(metaUnlocked);    // rarely drop a wall right ahead of you (the gaslight)
     }
 
     /** Steer an already-moving snake (turns are buffered in {@link GameState}'s queue). */
@@ -1015,7 +1027,11 @@ public class EmojiSnakeApp extends Application {
 
     private void render(IntensitySnapshot snap) {
         drawBackground();
-        drawTrail(snap);
+        if (metaUnlocked) {
+            drawTrail(snap); // the neon motion trail is part of the eye-bleed; off in plain runs
+        } else {
+            layers.clear(layers.trail());
+        }
         drawEntities(snap);
         drawOverlay(snap);
     }
@@ -1069,7 +1085,9 @@ public class EmojiSnakeApp extends Application {
         if (game.isDetached()) {
             drawReconnectHint(gc);
         }
-        particles.render(gc);
+        if (metaUnlocked) {
+            particles.render(gc); // no particle bursts in the plain pre-wake runs
+        }
     }
 
     /** A pulsing neon halo + rings behind a portal so the 🌀 actually pops off the board. */
@@ -1238,10 +1256,13 @@ public class EmojiSnakeApp extends Application {
         }
 
         // Gated chromatic aberration (snapshots content - fires only at high corruption), then
-        // the glitch bursts / hostile text, then the CRT on top.
-        fx.drawAberration(gc, layers.content(), snap, frameCount);
-        glitch.render(gc);
-        crt.draw(gc, 0.12 + corruption * 0.5);
+        // the glitch bursts / hostile text, then the CRT on top. ALL skipped in the plain pre-wake
+        // runs so they're indistinguishable from vanilla Snake (no CRT, no bloom-wash, no glitch).
+        if (metaUnlocked) {
+            fx.drawAberration(gc, layers.content(), snap, frameCount);
+            glitch.render(gc);
+            crt.draw(gc, 0.12 + corruption * 0.5);
+        }
 
         if (toastTimer > 0 && game.status() == GameState.Status.RUNNING && started) {
             gc.setTextAlign(TextAlignment.CENTER);
@@ -1541,6 +1562,7 @@ public class EmojiSnakeApp extends Application {
         runOne(only, "basilisk", this::playBasilisk);
         runOne(only, "fleeing", this::playFleeing);
         runOne(only, "funny67", this::playFunny67);
+        runOne(only, "gaslight", this::playGaslight);
         runOne(only, "secret", this::playSecret);
         runOne(only, "descend", this::playDescend);
         runOne(only, "vn-norepeat", this::playVnNoRepeat);
@@ -1817,6 +1839,21 @@ public class EmojiSnakeApp extends Application {
         check(game.score() == 67, "score did not reach 67 (was " + game.score() + ")");
         check(memeFlashTimer > 0, "the 6-7 meme flash did not fire");
         playRenderAndSnap("meme");
+    }
+
+    private void playGaslight() {
+        beginPlay(5L);
+        game.forceFood(new Point(0, 0)); // park food clear of the head's path
+        Point head = game.snakeBody().get(0);
+        Point wall = new Point(head.x() + game.direction().dx() * 2, head.y() + game.direction().dy() * 2);
+        game.forceGaslight(); // a wall drops two cells dead ahead
+        check(game.obstacles().contains(wall), "the gaslight wall did not appear two cells ahead");
+        playRenderAndSnap("wall");
+        step(); // head advances one cell (wall still one ahead)
+        step(); // head hits the wall -> crash -> revive in place, which BREAKS the wall (it "vanishes")
+        check(game.status() == GameState.Status.RUNNING, "the gaslight crash should revive, not end the run");
+        check(!started, "after the crash it waits at the press-to-continue gate");
+        check(!game.obstacles().contains(wall), "revive should break the wall so it vanishes (the gaslight)");
     }
 
     private void playSecret() {
