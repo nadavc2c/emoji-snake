@@ -30,17 +30,23 @@ case "$V" in
   *) VER="v0.0.0" ;;
 esac
 
-# Publish the freshest build to a single rolling "latest" release. Delete + recreate it each push so
-# its tag, timestamp, title, and assets ALL reflect this exact build - no drift (no more "v1.3 released
-# 4h ago, assets 6 min ago"). The hand-cut vX.Y releases stay as milestone history. All via gh (the
-# API), so nothing does a local `git push` that would re-trigger this hook.
+# Publish the freshest build to a single rolling "latest" release, so its tag, title, and assets ALL
+# reflect this exact build - no drift (no more "v1.3 released 4h ago but assets 6 min ago"). The
+# hand-cut vX.Y releases stay as milestone history. Updated IN PLACE: move the rolling tag to HEAD via
+# the gh API (a local `git push --tags` would re-trigger this hook; delete+recreate races GitHub's
+# async tag deletion), then refresh notes and clobber the assets.
 if command -v gh >/dev/null 2>&1; then
   SHA=$(git rev-parse HEAD)
+  REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
   NOTES=$(printf '%s\n\n**Downloads**\n- `emoji-snake-windows.zip` - Windows, no Java needed: unzip, run `Emoji Snake\\Emoji Snake.exe`.\n- `emoji-snake-crossplatform.zip` - Windows/macOS/Linux, needs Java 25: unzip, run `bin/emoji-snake` (or `bin\\emoji-snake.bat`).\n\n_This release always tracks the newest push; the numbered vX.Y releases are milestones._' "The latest Emoji Snake build ($VER).")
   echo "pre-push: publishing rolling 'latest' release ($VER) ..."
-  gh release delete latest --yes --cleanup-tag >/dev/null 2>&1   # drop the previous rolling release + its tag (ok if absent)
-  if gh release create latest "dist/emoji-snake-windows.zip" "dist/emoji-snake-crossplatform.zip" \
-       --title "Emoji Snake $VER" --notes "$NOTES" --latest --target "$SHA" >/dev/null 2>&1; then
+  if gh release view latest >/dev/null 2>&1; then
+    gh api -X PATCH "repos/$REPO/git/refs/tags/latest" -f sha="$SHA" -F force=true >/dev/null 2>&1 # move tag to HEAD
+    gh release edit latest --title "Emoji Snake $VER" --notes "$NOTES" --latest >/dev/null 2>&1
+  else
+    gh release create latest --title "Emoji Snake $VER" --notes "$NOTES" --latest --target "$SHA" >/dev/null 2>&1
+  fi
+  if gh release upload latest "dist/emoji-snake-windows.zip" "dist/emoji-snake-crossplatform.zip" --clobber >/dev/null 2>&1; then
     echo "pre-push: 'latest' release updated -> $VER"
   else
     echo "pre-push: WARNING - could not publish the 'latest' release."
