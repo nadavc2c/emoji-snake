@@ -62,6 +62,14 @@ tasks.register<Exec>("jpackageImage") {
     val jpackageBin = javaToolchains.launcherFor(java.toolchain).get()
         .metadata.installationPath.file("bin/jpackage" + if (isWindows) ".exe" else "").asFile.absolutePath
 
+    // Up-to-date aware: only rebuild (and thus delete the old app-image) when the staged app/jars or
+    // the icon actually change. This is the common-case fix for the "could not remove" lock - an
+    // unchanged push (e.g. docs) skips jpackage entirely, so nothing is deleted and nothing can be
+    // locked. The retry below covers the rarer case of a real rebuild racing a transient AV/index lock.
+    inputs.dir(libDir).withPropertyName("appLib")
+    inputs.files(icoFile).withPropertyName("icon").optional()
+    outputs.dir(destDir.dir("Emoji Snake")).withPropertyName("appImage")
+
     doFirst {
         // jpackage refuses to overwrite an existing app-image, and it writes the runtime as
         // read-only — so clear the read-only flag before deleting (plain delete() fails on it).
@@ -69,10 +77,10 @@ tasks.register<Exec>("jpackageImage") {
         // antivirus) can briefly lock a file, which would otherwise fail the whole package+push.
         val existing = destDir.dir("Emoji Snake").asFile
         var attempts = 0
-        while (existing.exists() && attempts++ < 5) {
+        while (existing.exists() && attempts++ < 8) {
             existing.walkBottomUp().forEach { it.setWritable(true); it.delete() }
             if (existing.exists()) {
-                Thread.sleep(300) // back off and let the transient lock clear
+                Thread.sleep(500) // back off and let the transient lock clear
             }
         }
         if (existing.exists()) {
