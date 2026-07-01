@@ -25,8 +25,10 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle-home"
 ```powershell
 .\run.ps1                 # run the game (sets GRADLE_USER_HOME, calls gradlew run)
 run.cmd                   # same, for cmd / double-click
-.\package.ps1             # build a distributable Windows app-image -> dist\emoji-snake-windows.zip
+.\package.ps1             # build BOTH distributables -> dist\emoji-snake-windows.zip (jpackage app-image,
+                          #   no Java needed) AND dist\emoji-snake-crossplatform.zip (Win/mac/Linux, needs JDK 25)
                           #   (first-party jpackage only; -RegenIcon also rebuilds art\snake.ico)
+gradlew.bat crossPlatformZip  # just the one cross-platform zip (all-OS JavaFX natives + bin/ launchers)
 
 # These need GRADLE_USER_HOME set (see above) - or run via the wrappers:
 gradlew.bat test                                          # all tests (JUnit 5)
@@ -53,7 +55,11 @@ gradlew.bat run --args="--debug"               # in-game: '[' / ']' nudge corrup
 
 There is no separate lint step. The Gradle wrapper pins Gradle 9.6.1; the toolchain pins JDK 25 (resolves to the JDK running Gradle - no download).
 
-**Distribution** (`jpackageImage` task / `package.ps1`): a self-contained Windows **app-image** built with the JDK's own `jpackage` (no third-party plugins). `installDist` lays out the app jar + JavaFX jars under `build/install/emoji-snake/lib`; `jpackage` wraps that + a trimmed JRE into `dist\Emoji Snake\` (then `package.ps1` zips it). JavaFX rides on the **classpath** (so launch goes through the non-`Application` `com.emojisnake.Launcher` to avoid the "JavaFX runtime components missing" guard); the bundled runtime is trimmed via `--add-modules` (must include `java.desktop` for Swing/`SwingFXUtils`/audio). The exe icon is the committed `art\snake.ico` (PNG-embedded 256² derived from the slop-generated `art\snake.png`).
+**Distribution** - two artifacts, both from a single machine, **no CI**:
+- **Windows app-image** (`jpackageImage` task / `package.ps1`): a self-contained Windows app-image built with the JDK's own `jpackage` (no third-party plugins), **no Java needed** by the recipient. `installDist` lays out the app jar + JavaFX jars under `build/install/emoji-snake/lib`; `jpackage` wraps that + a trimmed JRE into `dist\Emoji Snake\` (then `package.ps1` zips it to `dist\emoji-snake-windows.zip`). JavaFX rides on the **classpath** (so launch goes through the non-`Application` `com.emojisnake.Launcher` to avoid the "JavaFX runtime components missing" guard); the bundled runtime is trimmed via `--add-modules` (must include `java.desktop` for Swing/`SwingFXUtils`/audio). The exe icon is the committed `art\snake.ico` (PNG-embedded 256² derived from the slop-generated `art\snake.png`).
+- **Cross-platform zip** (`crossPlatformZip` task → `dist\emoji-snake-crossplatform.zip`): ONE archive that runs on **Windows/macOS/Linux** given a **JDK 25** on the target. Java is portable; the only per-OS bits are JavaFX's native libs, which live only in **`javafx-graphics`**'s platform-classifier jars (`win`/`mac`/`mac-aarch64`/`linux`/`linux-aarch64`). Each classifier is fetched in its **own** configuration (JavaFX's Gradle Module Metadata gives them all the same capability, so several in one config are rejected as a conflict), staged into `lib/` alongside the host's base/controls/swing jars, and JavaFX loads the matching natives at launch. `bin/emoji-snake` (LF, `packaging/`) + `bin\emoji-snake.bat` run `java -cp "lib/*" com.emojisnake.Launcher` (same classpath+Launcher trick as jpackage).
+
+**Auto-packaging**: the committed `.githooks/pre-push` (enable with `git config core.hooksPath .githooks`) runs `package.ps1` on every push and `gh release upload --clobber`s both zips to the latest release - best-effort/non-blocking (skips cleanly if gh/offline/no release). `.gitattributes` pins the shell hook + `packaging/emoji-snake` launcher to LF so their shebangs survive `core.autocrlf`.
 
 ## Architecture
 

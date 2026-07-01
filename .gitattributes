@@ -1,3 +1,4 @@
-# Shell hooks must stay LF so their shebang works under Git Bash even with core.autocrlf=true.
+# Shell hooks + launchers must stay LF so their shebang works even with core.autocrlf=true.
 .githooks/** text eol=lf
+packaging/emoji-snake text eol=lf
 *.sh text eol=lf

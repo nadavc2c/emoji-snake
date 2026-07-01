@@ -1,11 +1,12 @@
 #!/bin/sh
-# Auto-refresh the distributable on every push and upload it to the latest GitHub release,
-# so both dist/emoji-snake-windows.zip AND the release asset always match the pushed code
-# (no need to remember to repackage or re-upload). Fully non-blocking: any failure warns
+# Auto-refresh the distributables on every push and upload them to the latest GitHub release, so both
+# the local dist/*.zip AND the release assets always match the pushed code (no need to remember to
+# repackage or re-upload). package.ps1 builds two: the Windows jpackage image (no Java needed) and
+# the cross-platform zip (Windows/macOS/Linux, needs Java 25). Fully non-blocking: any failure warns
 # but still lets the push through.
 #
 # Enable on a fresh clone with:  git config core.hooksPath .githooks
-echo "pre-push: refreshing dist/emoji-snake-windows.zip ..."
+echo "pre-push: refreshing dist/*.zip ..."
 if command -v pwsh >/dev/null 2>&1; then
   PS=pwsh
 else
@@ -20,9 +21,9 @@ fi
 if command -v gh >/dev/null 2>&1; then
   TAG=$(gh release view --json tagName -q .tagName 2>/dev/null)
   if [ -n "$TAG" ]; then
-    echo "pre-push: uploading zip to the latest release ($TAG) ..."
-    gh release upload "$TAG" "dist/emoji-snake-windows.zip" --clobber \
-      || echo "pre-push: WARNING - release upload failed (retry: gh release upload $TAG dist/emoji-snake-windows.zip --clobber)."
+    echo "pre-push: uploading zips to the latest release ($TAG) ..."
+    gh release upload "$TAG" "dist/emoji-snake-windows.zip" "dist/emoji-snake-crossplatform.zip" --clobber \
+      || echo "pre-push: WARNING - release upload failed (retry: gh release upload $TAG dist/*.zip --clobber)."
   else
     echo "pre-push: no release found; skipping asset upload (make one with: gh release create <tag> dist/emoji-snake-windows.zip)."
   fi

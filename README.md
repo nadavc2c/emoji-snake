@@ -89,16 +89,22 @@ Run the tests:
 ./gradlew -g .gradle-home test
 ```
 
-## Share it (build a standalone .exe)
+## Share it
 
-To make a copy a friend can run **without installing Java**:
-```powershell
-.\package.ps1
-```
-This uses the JDK's own `jpackage` (no extra tools) to build a self-contained app-image and zips it to
-**`dist\emoji-snake-windows.zip`**. They unzip it and double-click `Emoji Snake\Emoji Snake.exe` - a
-bundled, trimmed Java runtime + the snake icon travel with it. Nothing is installed on their machine
-either; deleting the folder removes it completely.
+`.\package.ps1` builds **two** distributables into `dist\` (from this one machine, no CI needed):
+
+- **`emoji-snake-windows.zip`** - Windows, **no Java needed.** The JDK's own `jpackage` (no extra
+  tools) wraps the game plus a trimmed Java runtime into a self-contained app-image; the recipient
+  unzips it and double-clicks `Emoji Snake\Emoji Snake.exe`. Nothing is installed; deleting the folder
+  removes it completely.
+- **`emoji-snake-crossplatform.zip`** - **Windows, macOS *and* Linux** from this single archive
+  (needs a **JDK/JRE 25** on the target). Because it's Java, only JavaFX's native libraries are
+  per-OS, so we bundle them for every platform and JavaFX loads the right set at launch. Unzip, then
+  run `bin/emoji-snake` (macOS/Linux) or `bin\emoji-snake.bat` (Windows).
+
+Rule of thumb: send a Windows friend the app-image (works even without Java); use the cross-platform
+zip for macOS/Linux, or anyone who already has Java 25. (You can also just run from source on any OS -
+see **Run it** above.)
 
 ## Self-contained - your machine stays clean
 

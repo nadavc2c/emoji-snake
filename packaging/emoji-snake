@@ -1,0 +1,7 @@
+#!/bin/sh
+# Cross-platform launcher (macOS / Linux). Needs a JDK or JRE 25 on PATH (java -version).
+# JavaFX rides on the classpath, so we bounce through the non-Application Launcher to avoid the
+# JVM's "JavaFX runtime components are missing" guard. All platforms' JavaFX natives are in ../lib;
+# JavaFX loads the set matching this machine automatically.
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec java -cp "$DIR/../lib/*" com.emojisnake.Launcher "$@"

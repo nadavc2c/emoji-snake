@@ -42,6 +42,14 @@ if (Test-Path $zip) { Remove-Item $zip -Force }
 Write-Host "Zipping $appImage -> $zip ..."
 Compress-Archive -Path $appImage -DestinationPath $zip -Force
 
+# Also build the ONE cross-platform archive (Windows/macOS/Linux, needs a JDK 25 on the target).
+& (Join-Path $root 'gradlew.bat') crossPlatformZip
+if ($LASTEXITCODE -ne 0) { throw "crossPlatformZip failed (exit $LASTEXITCODE)" }
+$xzip = Join-Path $root 'dist\emoji-snake-crossplatform.zip'
+
 Write-Host ""
-Write-Host "Done. Distributable: $zip"
-Write-Host "Recipients unzip it and run 'Emoji Snake\Emoji Snake.exe' — no Java install required."
+Write-Host "Done. Distributables:"
+Write-Host "  $zip"
+Write-Host "    -> Windows, NO Java needed: unzip, run 'Emoji Snake\Emoji Snake.exe'."
+Write-Host "  $xzip"
+Write-Host "    -> Windows/macOS/Linux, needs Java 25: unzip, run bin/emoji-snake (or bin\emoji-snake.bat)."

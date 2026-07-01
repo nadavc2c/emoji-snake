@@ -97,3 +97,56 @@ tasks.register<Exec>("jpackageImage") {
     }
     commandLine(args)
 }
+
+// --- Cross-platform distribution: ONE zip that runs on Windows, macOS AND Linux ------------------
+// Java is portable, so this needs no per-OS build and no CI - it's produced from any single machine.
+// The only per-OS pieces are JavaFX's native libraries, which live in javafx-graphics's platform
+// classifier jars (win / linux / linux-aarch64 / mac / mac-aarch64). The OpenJFX plugin already
+// bundles the build host's set on the runtime classpath; here we ADD the other platforms' graphics
+// jars, and JavaFX loads whichever matches the machine it's launched on. (Only javafx-graphics
+// carries natives; base/controls/swing are pure Java, so the host jars already cover them.)
+//
+// Unlike the jpackage app-image (self-contained, no Java needed, but Windows-only from a Windows
+// box), this archive needs a JDK/JRE 25 on the target - but a single build serves every OS. Launch
+// via the classpath + non-Application Launcher (same trick as jpackage) so JavaFX-on-classpath
+// doesn't trip the "runtime components missing" guard.
+// One configuration PER platform: JavaFX's Gradle Module Metadata gives every platform variant the
+// same capability ('org.openjfx:javafx-graphics'), so putting several in one configuration is
+// "rejected" as a capability conflict. Isolating each classifier in its own configuration sidesteps
+// that. The host's own graphics jar also arrives via runtimeClasspath; the zip's EXCLUDE
+// duplicates-strategy drops that second copy.
+val jfxNativePlatforms = listOf("win", "mac", "mac-aarch64", "linux", "linux-aarch64")
+val javafxNativeConfigs = jfxNativePlatforms.map { p ->
+    configurations.create("javafxNatives_" + p.replace('-', '_')) { isTransitive = false }
+}
+dependencies {
+    jfxNativePlatforms.forEach { p ->
+        add("javafxNatives_" + p.replace('-', '_'), "org.openjfx:javafx-graphics:25.0.3:$p")
+    }
+}
+
+tasks.register<Zip>("crossPlatformZip") {
+    group = "distribution"
+    description = "One archive that runs on Windows/macOS/Linux (needs a JDK 25 on the target)."
+    dependsOn("jar")
+    destinationDirectory.set(layout.projectDirectory.dir("dist"))
+    archiveFileName.set("emoji-snake-crossplatform.zip")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE // host graphics jar arrives from both sources
+    val appDir = "emoji-snake"
+    into("$appDir/lib") {
+        from(tasks.named("jar"))                       // the game's own jar
+        from(configurations.named("runtimeClasspath")) // JavaFX (+ any runtime deps) for the build host
+        javafxNativeConfigs.forEach { from(it) }       // + JavaFX graphics natives for every OS
+    }
+    into("$appDir/bin") {
+        from(layout.projectDirectory.file("packaging/emoji-snake.bat"))
+    }
+    into("$appDir/bin") {
+        from(layout.projectDirectory.file("packaging/emoji-snake"))
+        filePermissions { unix("0755") } // keep the Unix launcher executable inside the zip
+    }
+    doLast {
+        logger.lifecycle("Cross-platform zip: ${archiveFile.get().asFile} " +
+            "(unzip, then run bin/emoji-snake on macOS/Linux or bin\\emoji-snake.bat on Windows; needs Java 25)")
+    }
+}
