@@ -939,8 +939,9 @@ public final class GameState {
         if (p.equals(snake.peekFirst())) return basilisk ? Tile.CHICKEN : Tile.HEAD; // 🐔 the basilisk
         if (snakeCells.contains(p)) return Tile.BODY;
         if (detached && frozenCells.contains(p)) {
-            // The frozen body reads as dead terrain; the still-living neck reads as "eat me".
-            return p.equals(reconnectNode) ? Tile.BONUS : Tile.GRAVE;
+            // The frozen body reads as dead terrain (🪦); the still-living head/neck is the 🗿 you
+            // bite to reattach - a distinct tile so it's never confused with the 🤑 bonus gem.
+            return p.equals(reconnectNode) ? Tile.MOAI : Tile.GRAVE;
         }
         if (store != null && p.equals(store)) return Tile.STORE;
         if (egg != null && p.equals(egg)) return Tile.EGG;

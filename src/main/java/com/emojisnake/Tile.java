@@ -22,6 +22,7 @@ public enum Tile {
     FOOD_MEAT("1F356"),    // 🍖
 
     BONUS("1F911"),     // 🤑 money-mouth - time-limited bonus
+    MOAI("1F5FF"),      // 🗿 the shed snake's frozen head/neck - bite it to reattach (distinct from 🤑)
 
     BOOK("1F4D6"),      // 📖 rare "bookworm" pickup - opens the slop AI visual novel (kept out of FOODS)
     CHICKEN("1F414"),   // 🐔 the basilisk head (after the roasted-chicken gag)

@@ -66,8 +66,3 @@ tiles on any machine, the board is drawn from bundled **OpenMoji** color PNGs (C
 Code is **MIT** (see [`LICENSE`](LICENSE)). Bundled assets keep their own licenses: emoji tiles are
 **OpenMoji** (CC BY-SA 4.0); other art is generated locally with
 [FLUX.2](https://github.com/nadavc2c/SlopMachine) (see `src/main/resources/vn/CREDITS.md`).
-
----
-
-<sub>Building the project or curious what's under the hood? See [`docs/`](docs/) — but
-[`docs/SPOILERS.md`](docs/SPOILERS.md) does what it says on the tin. 🤫</sub>

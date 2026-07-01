@@ -713,7 +713,7 @@ public class EmojiSnakeApp extends Application {
                     double[] nc = cellCenter(neck);
                     particles.burst(nc[0], nc[1], (int) (40 * juice()), Color.web("#7ee081"), 260);
                 }
-                toast(metaUnlocked ? "you came apart. bite your neck." : "you fell apart! eat the 🤑");
+                toast(metaUnlocked ? "you came apart. bite your neck." : "you fell apart! eat the 🗿");
             }
             case RECONNECT -> {
                 sound.bonus();

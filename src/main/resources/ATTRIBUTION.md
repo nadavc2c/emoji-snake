@@ -21,6 +21,7 @@ point. Roles in the game:
 | `1F369.png` | 🍩    | Food (donut)                  |
 | `1F356.png` | 🍖    | Food (meat)                   |
 | `1F911.png` | 🤑    | Time-limited bonus            |
+| `1F5FF.png` | 🗿    | Shed gag: the head/neck you bite to reattach |
 | `1F4D6.png` | 📖    | Rare book (opens visual novel)|
 | `1F414.png` | 🐔    | Basilisk head (chicken gag)   |
 | `1F95A.png` | 🥚    | Egg (reverts the basilisk)    |

@@ -26,6 +26,7 @@ roguelite that talks back, glitches, fakes your death, and sends you down a rabb
 | 🍖→🐔 / 🥚 | basilisk: roast chicken can turn your head into one; eat the egg to cure it |
 | 🪱🐭🐤 | living food — the only kind that flees when you crowd it |
 | ✂️ | the barber — a permanent "haircut" so your own tail stops strangling you |
+| 🪦 / 🗿 | during the shed gag: your frozen body / the head you bite to reattach |
 
 ## What makes it crazy
 
@@ -47,7 +48,7 @@ roguelite that talks back, glitches, fakes your death, and sends you down a rabb
   the thing that makes the deep floors survivable. Buy your way down the back-room floors, finish all
   five novels, and a real **ending** unlocks. (No spoilers on what you become — earn it.)
 - **Rare gags** — once in a long while your whole body just… falls apart. It freezes into a row of
-  tombstones and your head pops off on its own. Crawl back and bite your still-living neck (the 🤑,
+  tombstones and your head pops off on its own. Crawl back and bite your still-living head (the 🗿,
   ringed in green) to pull yourself back together.
 - **The slow reveal** — the first couple of runs play it straight (even the window title stays plain).
   Then the game starts *talking* (dark, cruel, depressive-funny), glitching, and faking your death.

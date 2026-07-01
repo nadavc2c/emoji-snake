@@ -37,7 +37,7 @@ class ShedGagTest {
         assertEquals(1, g.length(), "only the head keeps moving");
         assertEquals(head, g.snakeBody().get(0), "the head stays exactly where it was");
         assertEquals(new Point(12, 10), g.reconnectNode(), "the neck becomes the reconnect node");
-        assertSame(Tile.BONUS, g.tileAt(12, 10), "the living neck reads as edible");
+        assertSame(Tile.MOAI, g.tileAt(12, 10), "the living neck reads as the 🗿 you bite to reattach");
         assertSame(Tile.GRAVE, g.tileAt(8, 10), "the rest of the body reads as dead terrain");
     }
 
