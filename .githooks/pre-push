@@ -1,8 +1,8 @@
 #!/bin/sh
-# Auto-refresh the distributables on every push, upload them to the latest GitHub release, AND mirror
-# them (epoch-stamped) to the shared Google Drive folder - so the local dist/*.zip, the release
-# assets, and the Drive copies always match the pushed code (no need to remember to repackage,
-# re-upload, or re-copy). package.ps1 builds two: the Windows jpackage image (no Java needed) and the
+# Auto-refresh the distributables on every push: upload them to the latest GitHub release (and stamp
+# that release's notes with the build id), AND mirror them (build-id-named) to the shared Google Drive
+# folder - so the local dist/*.zip, the release assets, and the Drive copies always match the pushed
+# code (no need to remember to repackage, re-upload, or re-copy). package.ps1 builds two: the Windows jpackage image (no Java needed) and the
 # cross-platform zip (Windows/macOS/Linux, needs Java 25). Fully non-blocking: any failure - including
 # a missing Drive folder - just warns, and the push still goes through.
 #
@@ -18,13 +18,33 @@ if ! "$PS" -NoProfile -ExecutionPolicy Bypass -File ./package.ps1; then
   exit 0
 fi
 
-# Keep the latest release's Windows asset in sync (best-effort; skip cleanly if unavailable).
+# Build id: git-standard "tag-commits-gsha" (latest release tag + commits since + short hash). Used
+# for the release notes and the Drive filenames so both trace back to the exact source commit.
+VER=$(git describe --tags --always --dirty 2>/dev/null)
+[ -n "$VER" ] || VER=$(git rev-parse --short HEAD 2>/dev/null) # fallback in a tagless checkout
+
+# Keep the latest release's assets in sync (best-effort; skip cleanly if unavailable).
 if command -v gh >/dev/null 2>&1; then
   TAG=$(gh release view --json tagName -q .tagName 2>/dev/null)
   if [ -n "$TAG" ]; then
     echo "pre-push: uploading zips to the latest release ($TAG) ..."
     gh release upload "$TAG" "dist/emoji-snake-windows.zip" "dist/emoji-snake-crossplatform.zip" --clobber \
       || echo "pre-push: WARNING - release upload failed (retry: gh release upload $TAG dist/*.zip --clobber)."
+    # Record which build these assets are, so the release reflects the pushed build (provenance in the
+    # notes). Everything above the invisible marker is the hand-written milestone note and is kept;
+    # only the build line below the marker is regenerated, so it never accumulates. The marker sits on
+    # its OWN line (the leading \n matters: command substitution strips BASE's trailing newline, and a
+    # glued marker would make the next run's awk eat the last human line).
+    MARK="<!-- pre-push:build -->"
+    OLD=$(gh release view "$TAG" --json body -q .body 2>/dev/null)
+    BASE=$(printf '%s\n' "$OLD" | awk -v m="$MARK" 'index($0, m) { exit } { print }')
+    if gh release edit "$TAG" \
+        --notes "$(printf '%s\n%s\n\n_Downloads on this release are build **%s**._\n' "$BASE" "$MARK" "$VER")" \
+        >/dev/null 2>&1; then
+      echo "pre-push: release notes updated -> build $VER"
+    else
+      echo "pre-push: WARNING - could not update release notes."
+    fi
   else
     echo "pre-push: no release found; skipping asset upload (make one with: gh release create <tag> dist/emoji-snake-windows.zip)."
   fi
@@ -40,8 +60,6 @@ fi
 # but NO failure if the folder isn't mounted.
 DRIVE_DIR="/g/My Drive/Shared/emoji snake"
 if [ -d "$DRIVE_DIR" ]; then
-  VER=$(git describe --tags --always --dirty 2>/dev/null)
-  [ -n "$VER" ] || VER=$(git rev-parse --short HEAD 2>/dev/null) # fallback in a tagless checkout
   echo "pre-push: mirroring zips to Google Drive (build $VER) ..."
   rm -f "$DRIVE_DIR"/emoji-snake-*.zip
   if cp "dist/emoji-snake-windows.zip"       "$DRIVE_DIR/emoji-snake-windows-$VER.zip" \
