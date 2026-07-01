@@ -1,3 +1,5 @@
+import java.nio.file.Files // `java.*` can't be used inline: `java` resolves to the Java plugin extension
+
 plugins {
     application
     // Official OpenJFX Gradle plugin: pulls JavaFX from Maven Central and wires the
@@ -62,30 +64,30 @@ tasks.register<Exec>("jpackageImage") {
     val jpackageBin = javaToolchains.launcherFor(java.toolchain).get()
         .metadata.installationPath.file("bin/jpackage" + if (isWindows) ".exe" else "").asFile.absolutePath
 
-    // Up-to-date aware: only rebuild (and thus delete the old app-image) when the staged app/jars or
-    // the icon actually change. This is the common-case fix for the "could not remove" lock - an
-    // unchanged push (e.g. docs) skips jpackage entirely, so nothing is deleted and nothing can be
-    // locked. The retry below covers the rarer case of a real rebuild racing a transient AV/index lock.
+    // Incremental: jpackage re-runs only when the staged app/jars or the icon change, so a no-op
+    // build skips it (and the delete below) entirely.
     inputs.dir(libDir).withPropertyName("appLib")
     inputs.files(icoFile).withPropertyName("icon").optional()
     outputs.dir(destDir.dir("Emoji Snake")).withPropertyName("appImage")
 
     doFirst {
-        // jpackage refuses to overwrite an existing app-image, and it writes the runtime as
-        // read-only — so clear the read-only flag before deleting (plain delete() fails on it).
-        // Retry a few times: on Windows a transient handle (Google Drive sync / Search indexer /
-        // antivirus) can briefly lock a file, which would otherwise fail the whole package+push.
+        // jpackage won't overwrite an existing app-image, so delete the previous one first. jpackage on
+        // JDK 25+ writes the launcher exe with the DOS read-only attribute (JDK-8363926), and JDK 25
+        // changed File.delete to fail on read-only files (JDK-8355954). Per the official guidance
+        // (inside.java 2025-06-16), clear the read-only attribute before deleting: Files.setAttribute
+        // "dos:readonly" false, then delete bottom-up. A file that still refuses to go is genuinely in
+        // use (the game is running from dist\), so stop with a clear message.
         val existing = destDir.dir("Emoji Snake").asFile
-        var attempts = 0
-        while (existing.exists() && attempts++ < 8) {
-            existing.walkBottomUp().forEach { it.setWritable(true); it.delete() }
-            if (existing.exists()) {
-                Thread.sleep(500) // back off and let the transient lock clear
+        if (existing.exists()) {
+            existing.walkBottomUp().forEach { f ->
+                val p = f.toPath()
+                runCatching { Files.setAttribute(p, "dos:readonly", false) }
+                runCatching { Files.delete(p) }
             }
         }
         if (existing.exists()) {
             throw GradleException(
-                "Could not remove $existing — close 'Emoji Snake.exe' if it's running, then retry.",
+                "Could not remove $existing — it's in use. Close the running game / 'Emoji Snake.exe' and re-run.",
             )
         }
         destDir.asFile.mkdirs()
