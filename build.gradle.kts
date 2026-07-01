@@ -8,7 +8,23 @@ plugins {
 }
 
 group = "com.emojisnake"
-version = "1.0.0"
+
+// Single source of truth for the version: derived from git so the app, the jar name, the jpackage
+// app-version, the GitHub release, and the Drive filenames all share ONE number. MAJOR.MINOR come from
+// the latest `vX.Y` tag; PATCH = commits since it - so it advances on every push (v1.3 -> 1.3.0, then
+// 1.3.1, 1.3.2, ...). Falls back to 0.0.0 if git/tags are unavailable (jpackage needs numeric X.Y.Z).
+fun gitVersion(): String {
+    return try {
+        val raw = ProcessBuilder("git", "describe", "--tags", "--match", "v[0-9]*", "--always")
+            .redirectErrorStream(true).start()
+            .inputStream.bufferedReader().readText().trim().removePrefix("v")
+        val m = Regex("""^(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?$""").find(raw)
+        if (m != null) "${m.groupValues[1]}.${m.groupValues[2]}.${m.groupValues[3].ifEmpty { "0" }}" else "0.0.0"
+    } catch (e: Exception) {
+        "0.0.0"
+    }
+}
+version = gitVersion()
 
 repositories {
     mavenCentral()

@@ -1,8 +1,8 @@
 #!/bin/sh
-# Auto-refresh the distributables on every push: upload them to the latest GitHub release (and stamp
-# that release's notes with the build id), AND mirror them (build-id-named) to the shared Google Drive
-# folder - so the local dist/*.zip, the release assets, and the Drive copies always match the pushed
-# code (no need to remember to repackage, re-upload, or re-copy). package.ps1 builds two: the Windows jpackage image (no Java needed) and the
+# Auto-refresh the distributables on every push: publish them to a single rolling "latest" GitHub
+# release AND mirror them to the shared Google Drive folder - both stamped with ONE git-derived version
+# (vMAJOR.MINOR.PATCH), so the app, the release, and the Drive copies always show the same number and
+# match the pushed code. package.ps1 builds two: the Windows jpackage image (no Java needed) and the
 # cross-platform zip (Windows/macOS/Linux, needs Java 25). Fully non-blocking: any failure - including
 # a missing Drive folder - just warns, and the push still goes through.
 #
@@ -18,46 +18,39 @@ if ! "$PS" -NoProfile -ExecutionPolicy Bypass -File ./package.ps1; then
   exit 0
 fi
 
-# Build id: git-standard "tag-commits-gsha" (latest release tag + commits since + short hash). Used
-# for the release notes and the Drive filenames so both trace back to the exact source commit.
-VER=$(git describe --tags --always --dirty 2>/dev/null)
-[ -n "$VER" ] || VER=$(git rev-parse --short HEAD 2>/dev/null) # fallback in a tagless checkout
+# Single source of truth for the version (matches build.gradle's gitVersion): vMAJOR.MINOR.PATCH, with
+# MAJOR.MINOR from the latest vX.Y tag and PATCH = commits since it - so it advances on every push
+# (v1.3 -> v1.3.0, then v1.3.1, ...). One number for the release AND the Drive filenames.
+RAW=$(git describe --tags --match 'v[0-9]*' --always 2>/dev/null)
+V=${RAW#v}
+case "$V" in
+  *-*-g*) base=${V%%-*}; rest=${V#*-}; VER="v$base.${rest%%-*}" ;;  # v1.3-10-gsha -> v1.3.10
+  *[!0-9.]*) VER="v0.0.0" ;;                                        # bare commit hash / no tags
+  *.*) VER="v$V.0" ;;                                               # exact tag v1.3 -> v1.3.0
+  *) VER="v0.0.0" ;;
+esac
 
-# Keep the latest release's assets in sync (best-effort; skip cleanly if unavailable).
+# Publish the freshest build to a single rolling "latest" release. Delete + recreate it each push so
+# its tag, timestamp, title, and assets ALL reflect this exact build - no drift (no more "v1.3 released
+# 4h ago, assets 6 min ago"). The hand-cut vX.Y releases stay as milestone history. All via gh (the
+# API), so nothing does a local `git push` that would re-trigger this hook.
 if command -v gh >/dev/null 2>&1; then
-  TAG=$(gh release view --json tagName -q .tagName 2>/dev/null)
-  if [ -n "$TAG" ]; then
-    echo "pre-push: uploading zips to the latest release ($TAG) ..."
-    gh release upload "$TAG" "dist/emoji-snake-windows.zip" "dist/emoji-snake-crossplatform.zip" --clobber \
-      || echo "pre-push: WARNING - release upload failed (retry: gh release upload $TAG dist/*.zip --clobber)."
-    # Record which build these assets are, so the release reflects the pushed build (provenance in the
-    # notes). Everything above the invisible marker is the hand-written milestone note and is kept;
-    # only the build line below the marker is regenerated, so it never accumulates. The marker sits on
-    # its OWN line (the leading \n matters: command substitution strips BASE's trailing newline, and a
-    # glued marker would make the next run's awk eat the last human line).
-    MARK="<!-- pre-push:build -->"
-    OLD=$(gh release view "$TAG" --json body -q .body 2>/dev/null)
-    BASE=$(printf '%s\n' "$OLD" | awk -v m="$MARK" 'index($0, m) { exit } { print }')
-    if gh release edit "$TAG" \
-        --notes "$(printf '%s\n%s\n\n_Downloads on this release are build **%s**._\n' "$BASE" "$MARK" "$VER")" \
-        >/dev/null 2>&1; then
-      echo "pre-push: release notes updated -> build $VER"
-    else
-      echo "pre-push: WARNING - could not update release notes."
-    fi
+  SHA=$(git rev-parse HEAD)
+  NOTES=$(printf '%s\n\n**Downloads**\n- `emoji-snake-windows.zip` - Windows, no Java needed: unzip, run `Emoji Snake\\Emoji Snake.exe`.\n- `emoji-snake-crossplatform.zip` - Windows/macOS/Linux, needs Java 25: unzip, run `bin/emoji-snake` (or `bin\\emoji-snake.bat`).\n\n_This release always tracks the newest push; the numbered vX.Y releases are milestones._' "The latest Emoji Snake build ($VER).")
+  echo "pre-push: publishing rolling 'latest' release ($VER) ..."
+  gh release delete latest --yes --cleanup-tag >/dev/null 2>&1   # drop the previous rolling release + its tag (ok if absent)
+  if gh release create latest "dist/emoji-snake-windows.zip" "dist/emoji-snake-crossplatform.zip" \
+       --title "Emoji Snake $VER" --notes "$NOTES" --latest --target "$SHA" >/dev/null 2>&1; then
+    echo "pre-push: 'latest' release updated -> $VER"
   else
-    echo "pre-push: no release found; skipping asset upload (make one with: gh release create <tag> dist/emoji-snake-windows.zip)."
+    echo "pre-push: WARNING - could not publish the 'latest' release."
   fi
 else
-  echo "pre-push: gh CLI not found; skipping asset upload."
+  echo "pre-push: gh CLI not found; skipping the 'latest' release."
 fi
 
-# Mirror the fresh zips to the shared Google Drive folder, named with the build version from
-# `git describe` - the git-standard human-readable build id (latest release tag + commits-since +
-# short commit hash, e.g. v1.3-5-g08abcb7). It's traceable to the exact source commit and is SemVer
-# build-metadata style (semver.org allows a commit hash as build metadata). On a release commit it's
-# just the clean tag (v1.3). "Remove then copy" so only the newest build lives there. Loud warning
-# but NO failure if the folder isn't mounted.
+# Mirror the fresh zips to the shared Google Drive folder, named with the same $VER (vMAJOR.MINOR.PATCH).
+# "Remove then copy" so only the newest build lives there. Loud warning but NO failure if unmounted.
 DRIVE_DIR="/g/My Drive/Shared/emoji snake"
 if [ -d "$DRIVE_DIR" ]; then
   echo "pre-push: mirroring zips to Google Drive (build $VER) ..."
