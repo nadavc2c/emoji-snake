@@ -1,147 +1,73 @@
-# 🐍 Emoji Snake - eye-bleed edition
+# 🐍 Emoji Snake
 
-Classic Snake - but every "pixel" is a **color emoji tile**, wrapped in a trippy, hostile,
-self-aware roguelite. Built on the latest Java stack (**Java 25 + JavaFX 25**), rendered on a
-stacked JavaFX `Canvas` with a runtime chiptune synth - **no third-party dependencies**.
+Classic Snake — except every "pixel" on the board is a little color **emoji tile**. Built on
+**Java 25 + JavaFX 25**, with a runtime chiptune soundtrack and no third-party dependencies.
 
-It starts gentle. Then, after a couple of games, it *wakes up*.
+Eat the food, grow longer, don't crash into the walls or yourself. You know the drill. 🍎
 
-| Tile | Meaning |
-|------|---------|
-| 🐍 | snake head |
-| 🟢 | snake body |
-| 🍎🍕🍔🌮🍩🍖 | food (+1, grows you, speeds you up) |
-| 🤑 | bonus (+5, appears briefly every 5 foods) |
-| 🧱🪦💀 | obstacles (deadly) |
-| 🔥🧊👻🪙🧲 | power-ups - burn / slow / ghost / gold×2 / magnet (3-of-a-kind = synergy) |
-| 🌀 | portals (paired teleport) |
-| 👹 | the boss (genre-shift dodge fight every few levels) |
-| 📖 | a rare book - drops you into a "slop AI" visual novel (one of 5) |
-| 🏪 | the company store - spend score on power-ups *and* upgrades that last |
-| 🎰 | a slot-machine food - gamble it for length |
-| 🍖→🐔 / 🥚 | basilisk: roast chicken can turn your head into one; eat the egg to cure it |
-| 🪱🐭🐤 | living food - the only kind that flees when you crowd it |
-| ✂️ | the barber - a permanent "haircut" so your own tail stops strangling you |
+## Run it
+
+You'll need **Java 25**. Everything else is fetched into this folder on first run — nothing is
+installed on your machine.
+
+**Windows:**
+```powershell
+.\run.ps1
+```
+(or just double-click `run.cmd`)
+
+**macOS / Linux / any shell:**
+```
+./gradlew -g .gradle-home run
+```
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
-| Arrow keys / **W A S D** | steer (press to start; quick tap-taps buffer) |
+| Arrow keys / **W A S D** | steer (press a direction to start) |
 | **Space** / **P** | pause / resume |
 | **M** | mute / unmute |
-| **C** | calm mode (tone down the eye-bleed) |
-| **R** / **Enter** | restart after game over |
+| **R** / **Enter** | restart |
 | **Esc** | quit |
 
-Hit a wall, an obstacle, or yourself and you lose a life (you start with ♥♥♥). Out of lives and
-it's game over - usually. Your best score is saved. There may also be a secret. (↑↑↓↓←→←→ B A)
+Hit a wall, an obstacle, or your own tail and you lose a life (you start with ♥♥♥). Your best score
+is saved. Give it a few rounds. 🙂
 
-## What makes it crazy
+## Send it to a friend
 
-- **Adaptive chiptune** - a runtime square/triangle/noise synth whose tempo, layering, and
-  distortion ramp with your speed and the rising *corruption*.
-- **Juice** - screen shake, hitstop, particle bursts, neon bloom, motion trails, hue-cycling,
-  screen warp, chromatic aberration, CRT scanlines - all escalating, calibrated medium-high.
-- **Roguelite** - power-up elements, eat-3-of-a-kind synergies, portals, and a boss that turns
-  the game into a bullet-hell.
-- **A slop AI visual novel** - eat a 📖 and the game becomes a short branching dating-sim parody
-  set at a predatory all-snake law firm, with AI-generated art and a recurring cast. The clichés
-  play straight (senpai, rival-to-lover, the wholesome intern) - but the morality is *inverted*:
-  the kind, honest choices are the lethal bad ends. Five novels; a wrong choice costs a life.
-- **It actually goes somewhere** - spend score in the on-board 🏪 on power-ups *and* permanent
-  upgrades that stick across every run (Dead-Cells style): vested extra lives and **the barber**, a
-  ✂️ "haircut" that shears your tail as you grow so late-game length stops being an instant death -
-  the thing that makes the deep floors survivable. Buy your way down the back-room floors, finish all
-  five novels, and a real **ending** unlocks. (No spoilers on what you become.)
-- **Per-context music** - the runtime synth swaps to a fitting public-domain **classical** piece for
-  each takeover - doom for the boss, Für Elise in the shop, Pachelbel for the novel, Ode to Joy for
-  the finale - all played as note data through the same chip synth. Still zero audio files.
-- **Rare gags** - once in a long while your whole body just… falls apart. It freezes into a row of
-  tombstones and your head pops off on its own. Crawl back and bite your still-living neck (the 🤑,
-  ringed in green) to pull yourself back together.
-- **The slow reveal** - the first couple of runs play it straight. Then the game starts *talking*
-  (dark, cruel, depressive-funny), glitching, and faking your death. All illusions - it never
-  touches a single real file beyond its own save file.
-- **Forgiving on purpose** - press-to-start, 3 lives, gentle/decaying speed, a 1-in-3 "merciful
-  run", early walls that wrap, and fake deaths that hand you back. The derangement *is* the mercy.
+`.\package.ps1` builds two ready-to-run bundles into `dist\`:
 
-## Run it
+- **`emoji-snake-windows.zip`** — Windows, **no Java needed.** Unzip and double-click
+  `Emoji Snake\Emoji Snake.exe`.
+- **`emoji-snake-crossplatform.zip`** — **Windows, macOS *and* Linux** (needs **Java 25** installed).
+  Unzip, then run `bin/emoji-snake` (macOS/Linux) or `bin\emoji-snake.bat` (Windows).
 
-You have Java 25 installed; everything else is fetched into this folder on first run.
+## Your machine stays clean
 
-**Windows (PowerShell):**
-```powershell
-.\run.ps1
-```
-**Windows (cmd) / double-click:**
-```
-run.cmd
-```
-**Or directly via the Gradle wrapper** (any shell):
-```
-./gradlew -g .gradle-home run        # macOS/Linux/Git Bash
-gradlew.bat run                      # (set GRADLE_USER_HOME=.gradle-home first)
-```
+This project is a self-contained sandbox, like a Python `venv` but for Java:
 
-Run the tests:
-```
-./gradlew -g .gradle-home test
-```
-
-## Share it
-
-`.\package.ps1` builds **two** distributables into `dist\` (from this one machine, no CI needed):
-
-- **`emoji-snake-windows.zip`** - Windows, **no Java needed.** The JDK's own `jpackage` (no extra
-  tools) wraps the game plus a trimmed Java runtime into a self-contained app-image; the recipient
-  unzips it and double-clicks `Emoji Snake\Emoji Snake.exe`. Nothing is installed; deleting the folder
-  removes it completely.
-- **`emoji-snake-crossplatform.zip`** - **Windows, macOS *and* Linux** from this single archive
-  (needs a **JDK/JRE 25** on the target). Because it's Java, only JavaFX's native libraries are
-  per-OS, so we bundle them for every platform and JavaFX loads the right set at launch. Unzip, then
-  run `bin/emoji-snake` (macOS/Linux) or `bin\emoji-snake.bat` (Windows).
-
-Rule of thumb: send a Windows friend the app-image (works even without Java); use the cross-platform
-zip for macOS/Linux, or anyone who already has Java 25. (You can also just run from source on any OS -
-see **Run it** above.)
-
-## Self-contained - your machine stays clean
-
-This project is a sandbox, like a Python `venv` but for Java:
-
-- **Nothing is installed globally.** It uses your existing Java 25; no JDK/Gradle install,
-  no `PATH`/registry/global-settings changes.
+- **Nothing installs globally** — it uses your existing Java 25; no JDK/Gradle install, no
+  `PATH`/registry changes.
 - **All downloads stay in the repo.** `GRADLE_USER_HOME` is redirected to a repo-local
-  `.gradle-home/` (the run scripts do this for you), so Gradle itself, JavaFX, and JUnit
-  are cached *inside this folder* - never in your user profile.
-- All progress saves to a single `save.dat` **here**, not in your home directory (obfuscated +
-  tamper-evident). Delete that one file to start completely fresh.
-- **Deleting this folder removes 100% of the footprint.** (The only out-of-repo touch is
-  transient OS-temp extraction of JavaFX native libraries, which the OS cleans up.)
+  `.gradle-home/` (the run scripts do this for you), so Gradle, JavaFX, and JUnit cache *inside this
+  folder*.
+- Progress saves to a single `save.dat` **here**. Delete that one file to start fresh.
+- **Deleting this folder removes 100% of the footprint.**
 
-Ignored build dirs: `.gradle-home/`, `.gradle/`, `build/`.
+## Why emoji *images* instead of font emoji?
 
-## Why image tiles instead of font emoji?
-
-Java's desktop text rendering frequently draws emoji as black-and-white outlines. To
-guarantee colorful tiles on any machine, the board is drawn from bundled **OpenMoji**
-color PNGs (CC BY-SA 4.0 - see `src/main/resources/ATTRIBUTION.md`).
-
-## Layout
-
-```
-build.gradle.kts / settings.gradle.kts   # Java 25 toolchain + JavaFX 25 plugin
-run.cmd / run.ps1                          # self-contained launchers
-src/main/java/com/emojisnake/              # game source
-src/main/resources/emoji/                  # OpenMoji color PNGs
-src/main/resources/vn/                      # AI-generated visual-novel + ending art
-src/test/java/com/emojisnake/              # JUnit 5 logic tests
-```
+Java's desktop text rendering often draws emoji as black-and-white outlines. To guarantee colorful
+tiles on any machine, the board is drawn from bundled **OpenMoji** color PNGs (CC BY-SA 4.0 — see
+`src/main/resources/ATTRIBUTION.md`).
 
 ## License
 
-Code is **MIT** (see [`LICENSE`](LICENSE)). Bundled assets keep their own licenses: the emoji board
-tiles are **OpenMoji** (CC BY-SA 4.0, see `src/main/resources/ATTRIBUTION.md`) and the visual-novel /
-icon art is **AI-generated** locally with [FLUX.2](https://github.com/nadavc2c/SlopMachine)
-(see `src/main/resources/vn/CREDITS.md`).
+Code is **MIT** (see [`LICENSE`](LICENSE)). Bundled assets keep their own licenses: emoji tiles are
+**OpenMoji** (CC BY-SA 4.0); other art is generated locally with
+[FLUX.2](https://github.com/nadavc2c/SlopMachine) (see `src/main/resources/vn/CREDITS.md`).
+
+---
+
+<sub>Building the project or curious what's under the hood? See [`docs/`](docs/) — but
+[`docs/SPOILERS.md`](docs/SPOILERS.md) does what it says on the tin. 🤫</sub>
