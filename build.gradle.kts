@@ -65,14 +65,20 @@ tasks.register<Exec>("jpackageImage") {
     doFirst {
         // jpackage refuses to overwrite an existing app-image, and it writes the runtime as
         // read-only — so clear the read-only flag before deleting (plain delete() fails on it).
+        // Retry a few times: on Windows a transient handle (Google Drive sync / Search indexer /
+        // antivirus) can briefly lock a file, which would otherwise fail the whole package+push.
         val existing = destDir.dir("Emoji Snake").asFile
-        if (existing.exists()) {
+        var attempts = 0
+        while (existing.exists() && attempts++ < 5) {
             existing.walkBottomUp().forEach { it.setWritable(true); it.delete() }
             if (existing.exists()) {
-                throw GradleException(
-                    "Could not remove $existing — close 'Emoji Snake.exe' if it's running, then retry.",
-                )
+                Thread.sleep(300) // back off and let the transient lock clear
             }
+        }
+        if (existing.exists()) {
+            throw GradleException(
+                "Could not remove $existing — close 'Emoji Snake.exe' if it's running, then retry.",
+            )
         }
         destDir.asFile.mkdirs()
     }
