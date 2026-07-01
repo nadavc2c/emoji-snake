@@ -1,7 +1,8 @@
 #!/bin/sh
-# Auto-refresh the distributable on every push, so dist/emoji-snake-windows.zip always
-# matches the code being pushed (no need to remember to repackage). Non-blocking: if the
-# packaging fails, warn but still let the push through.
+# Auto-refresh the distributable on every push and upload it to the latest GitHub release,
+# so both dist/emoji-snake-windows.zip AND the release asset always match the pushed code
+# (no need to remember to repackage or re-upload). Fully non-blocking: any failure warns
+# but still lets the push through.
 #
 # Enable on a fresh clone with:  git config core.hooksPath .githooks
 echo "pre-push: refreshing dist/emoji-snake-windows.zip ..."
@@ -10,6 +11,22 @@ if command -v pwsh >/dev/null 2>&1; then
 else
   PS=powershell.exe
 fi
-"$PS" -NoProfile -ExecutionPolicy Bypass -File ./package.ps1 \
-  || echo "pre-push: WARNING - packaging failed; pushing code anyway (run .\\package.ps1 by hand)."
+if ! "$PS" -NoProfile -ExecutionPolicy Bypass -File ./package.ps1; then
+  echo "pre-push: WARNING - packaging failed; pushing code anyway (run .\\package.ps1 by hand)."
+  exit 0
+fi
+
+# Keep the latest release's Windows asset in sync (best-effort; skip cleanly if unavailable).
+if command -v gh >/dev/null 2>&1; then
+  TAG=$(gh release view --json tagName -q .tagName 2>/dev/null)
+  if [ -n "$TAG" ]; then
+    echo "pre-push: uploading zip to the latest release ($TAG) ..."
+    gh release upload "$TAG" "dist/emoji-snake-windows.zip" --clobber \
+      || echo "pre-push: WARNING - release upload failed (retry: gh release upload $TAG dist/emoji-snake-windows.zip --clobber)."
+  else
+    echo "pre-push: no release found; skipping asset upload (make one with: gh release create <tag> dist/emoji-snake-windows.zip)."
+  fi
+else
+  echo "pre-push: gh CLI not found; skipping asset upload."
+fi
 exit 0
