@@ -1,9 +1,10 @@
 #!/bin/sh
-# Auto-refresh the distributables on every push and upload them to the latest GitHub release, so both
-# the local dist/*.zip AND the release assets always match the pushed code (no need to remember to
-# repackage or re-upload). package.ps1 builds two: the Windows jpackage image (no Java needed) and
-# the cross-platform zip (Windows/macOS/Linux, needs Java 25). Fully non-blocking: any failure warns
-# but still lets the push through.
+# Auto-refresh the distributables on every push, upload them to the latest GitHub release, AND mirror
+# them (epoch-stamped) to the shared Google Drive folder - so the local dist/*.zip, the release
+# assets, and the Drive copies always match the pushed code (no need to remember to repackage,
+# re-upload, or re-copy). package.ps1 builds two: the Windows jpackage image (no Java needed) and the
+# cross-platform zip (Windows/macOS/Linux, needs Java 25). Fully non-blocking: any failure - including
+# a missing Drive folder - just warns, and the push still goes through.
 #
 # Enable on a fresh clone with:  git config core.hooksPath .githooks
 echo "pre-push: refreshing dist/*.zip ..."
@@ -29,5 +30,29 @@ if command -v gh >/dev/null 2>&1; then
   fi
 else
   echo "pre-push: gh CLI not found; skipping asset upload."
+fi
+
+# Mirror the fresh zips to the shared Google Drive folder, stamped with the build epoch (monotonic,
+# unique, and it tells you exactly when the build was made). "Remove then copy" so only the newest
+# build lives there. Loud warning but NO failure if the folder isn't mounted.
+DRIVE_DIR="/g/My Drive/Shared/emoji snake"
+if [ -d "$DRIVE_DIR" ]; then
+  VER=$(date +%s)
+  echo "pre-push: mirroring zips to Google Drive (build $VER) ..."
+  rm -f "$DRIVE_DIR"/emoji-snake-*.zip
+  if cp "dist/emoji-snake-windows.zip"       "$DRIVE_DIR/emoji-snake-windows-$VER.zip" \
+     && cp "dist/emoji-snake-crossplatform.zip" "$DRIVE_DIR/emoji-snake-crossplatform-$VER.zip"; then
+    echo "pre-push: Drive updated -> emoji-snake-{windows,crossplatform}-$VER.zip"
+  else
+    echo "pre-push: WARNING - copying to Drive failed; push continues."
+  fi
+else
+  echo ""
+  echo "  ##################################################################"
+  echo "  ##  pre-push WARNING: shared Drive folder NOT found - copy SKIPPED"
+  echo "  ##    $DRIVE_DIR"
+  echo "  ##  (is Google Drive mounted at G:?)  The push continues anyway.  "
+  echo "  ##################################################################"
+  echo ""
 fi
 exit 0
