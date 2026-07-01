@@ -31,10 +31,32 @@ import javafx.scene.text.TextAlignment;
 public final class StoreInterlude implements Interlude {
 
     private static final int STATUS_TICKS = 140;
-    private static final int[] FLOOR_PRICE = {35, 80, 150, 260, 420}; // to descend FROM floor i
+    // Prices tuned so a competent player reaches the TRUE ENDING in ~20 min of total play (see the
+    // economy note in CLAUDE.md and the --play:win scenario that measures the food/score cost). The
+    // 📈 stock rally + these softened gates keep the critical path ~655 score (floors+ending).
+    private static final int[] FLOOR_PRICE = {25, 50, 90, 140, 200}; // to descend FROM floor i (sum 505)
     private static final int[] LIFE_PRICE = {40, 90};                 // for the 1st / 2nd +max-life
-    private static final int[] BARBER_PRICE = {50, 120, 250};         // for the 1st / 2nd / 3rd haircut
-    private static final int ENDING_PRICE = 220;
+    private static final int[] BARBER_PRICE = {40, 90, 160};          // 1st/2nd/3rd haircut (now optional QoL)
+    private static final int ENDING_PRICE = 150;
+
+    /** Sum of the back-room floor prices - the score cost of descending every floor. */
+    public static int floorPriceSum() {
+        int sum = 0;
+        for (int p : FLOOR_PRICE) {
+            sum += p;
+        }
+        return sum;
+    }
+
+    /** The TRUE ENDING price. */
+    public static int endingPrice() {
+        return ENDING_PRICE;
+    }
+
+    /** Critical-path score to the TRUE ENDING: descend every floor + buy the ending (BARBER excluded). */
+    public static int criticalPathScore() {
+        return floorPriceSum() + ENDING_PRICE;
+    }
 
     private final GameState game;
     private final EmojiAtlas atlas;
@@ -284,7 +306,7 @@ public final class StoreInterlude implements Interlude {
         // 7: persistent haircut - the survival meta that makes the deep floors reachable
         y += rowH;
         boolean canBarber = !trimMaxed() && game.score() >= trimPrice();
-        row(gc, w, y, rowH, 7, trimMaxed() ? "THE BARBER - MAXED" : "THE BARBER  (✂ shorter tail as you grow, FOREVER)",
+        row(gc, w, y, rowH, 7, trimMaxed() ? "THE BARBER - MAXED" : "THE BARBER  (shorter tail, FOREVER)",
                 trimMaxed() ? "-" : trimPrice() + " pts", Tile.SCISSORS, canBarber, "#101a26");
         // 8: descend a floor (the spine)
         y += rowH;
@@ -292,7 +314,7 @@ public final class StoreInterlude implements Interlude {
         row(gc, w, y, rowH, 8,
                 descendAvailable() ? "THE BACK ROOM  (descend to Floor " + (rank + 1) + "/" + maxFloors + ")"
                         : "THE BACK ROOM - all floors cleared",
-                descendAvailable() ? floorPrice() + " pts" : "-", Tile.PORTAL, canDescend, "#101a26");
+                descendAvailable() ? floorPrice() + " pts" : "-", Tile.DOOR, canDescend, "#101a26");
         // 9: the ending (red herring until the bottom)
         y += rowH;
         boolean canEnd = endingUnlocked() && game.score() >= ENDING_PRICE;

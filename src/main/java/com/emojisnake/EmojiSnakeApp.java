@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
@@ -65,6 +66,7 @@ public class EmojiSnakeApp extends Application {
     private static final Color BG = Color.web("#0f1410");
     private static final Color HUD_BG = Color.web("#1b241c");
     private static final Color ACCENT = Color.web("#7ee081");
+    private static final Color STOCK_GREEN = Color.web("#5ff08a"); // 📈 rally: HUD readout + eat burst
 
     // Forgiveness + the slow "wake up" reveal.
     private static final int BASE_MAX_LIVES = 3;
@@ -769,6 +771,25 @@ public class EmojiSnakeApp extends Application {
                     interlude = new SlotInterlude(atlas);
                 }
             }
+            case STOCK -> {
+                // Bought a share: the portfolio (score multiplier) just grew. Green "up" juice.
+                sound.bonus();
+                particles.burst(c[0], c[1], (int) (28 * juice()), STOCK_GREEN, 240);
+                camera.kick(0.05 * juice());
+                toast(metaUnlocked
+                        ? String.format(Locale.ROOT, "📈 +1 share  ·  portfolio %.1fx", game.stockMultiplier())
+                        : String.format(Locale.ROOT, "📈 stock! score x%.1f", game.stockMultiplier()));
+            }
+            case CRASH -> {
+                // Margin call: the market corrected and halved the portfolio. Red "down" jolt.
+                sound.crash();
+                particles.burst(c[0], c[1], (int) (34 * juice()), Color.web("#ff4d6d"), 260);
+                camera.addTrauma(0.35 * juice());
+                camera.kick(0.06 * juice());
+                toast(metaUnlocked
+                        ? String.format(Locale.ROOT, "📉 MARGIN CALL  ·  down to %.1fx", game.stockMultiplier())
+                        : "📉 the market crashed!");
+            }
         }
     }
 
@@ -926,6 +947,13 @@ public class EmojiSnakeApp extends Application {
                 }
                 return;
             }
+            case K -> { // debug: drop a 📈 stock dead ahead (eat it to grow the portfolio)
+                if (debug && started && game.status() == GameState.Status.RUNNING) {
+                    Point h = game.snakeBody().get(0);
+                    game.forceStockFood(h.step(game.direction()));
+                }
+                return;
+            }
             default -> { /* fall through to gameplay keys */ }
         }
 
@@ -1007,6 +1035,7 @@ public class EmojiSnakeApp extends Application {
         game.setFleeingFoodEnabled(metaUnlocked); // food bolts when you crowd it
         game.setBasiliskEnabled(metaUnlocked);    // roasted chicken can hatch the cockatrice
         game.setGambleEnabled(metaUnlocked);      // a food can be a 🎰 slot machine
+        game.setStocksEnabled(metaUnlocked);      // 📈 stocks compound score (the deep-floor rally)
         game.setTrimPerLevel(metaUnlocked ? meta.trim() : 0); // the persistent BARBER haircut
         // The gaslight is ONLY for the plain pre-wake games: it caps a too-long plain run (walls in
         // your face burn your lives) to push you to the wake-up. Once awake, the chaos does that job.
@@ -1242,7 +1271,16 @@ public class EmojiSnakeApp extends Application {
         gc.setFill(Color.web("#cfd6cf"));
         gc.setTextAlign(TextAlignment.RIGHT);
         String flags = (sound.isEnabled() ? "" : "  (muted)") + (calm ? "  (calm)" : "");
-        gc.fillText(glitch.garble("Lvl " + game.level() + flags), WIDTH - 14 + j, mid + j);
+        String lvlStr = "Lvl " + game.level() + flags;
+        gc.fillText(glitch.garble(lvlStr), WIDTH - 14 + j, mid + j);
+
+        // Live 📈 portfolio multiplier (only while holding shares), tucked to the LEFT of the level in
+        // the far-right cluster - so it never overlaps the centered "Best…" text, even at huge scores.
+        if (game.shares() > 0) {
+            gc.setFill(STOCK_GREEN);
+            gc.fillText(String.format(Locale.ROOT, "▲%.1fx", game.stockMultiplier()),
+                    WIDTH - 14 - lvlStr.length() * 11.0 - 12 + j, mid + j);
+        }
     }
 
     private void drawBoard(GraphicsContext gc) {
@@ -1586,6 +1624,7 @@ public class EmojiSnakeApp extends Application {
         runOne(only, "powerup", this::playPowerup);
         runOne(only, "shed", this::playShed);
         runOne(only, "slot", this::playSlot);
+        runOne(only, "stock", this::playStock);
         runOne(only, "book-open", this::playBookOpen);
         runOne(only, "book-win", this::playBookWin);
         runOne(only, "book-death", this::playBookDeath);
@@ -1602,6 +1641,7 @@ public class EmojiSnakeApp extends Application {
         runOne(only, "vn-norepeat", this::playVnNoRepeat);
         runOne(only, "ending-locked", this::playEndingBlockedUntilNovelsRead);
         runOne(only, "ending", this::playEnding);
+        runOne(only, "win", this::playWin);
 
         System.out.println("\n=== PLAY REPORT ===");
         playReport.forEach(System.out::println);
@@ -2011,6 +2051,89 @@ public class EmojiSnakeApp extends Application {
             finishInterlude();
         }
         check(game.status() == GameState.Status.GAME_OVER, "the finale should end the run on a win screen");
+    }
+
+    private void playStock() {
+        beginPlay(5L);
+        game.setStocksEnabled(true);
+        game.clearObstacles();
+        playRenderAndSnap("setup");
+        game.forceStockFood(ahead());
+        // Drive the tick directly (not step()) so we can inspect notices before they're dispatched: the
+        // STOCK notice is queued when the share is bought, BEFORE the end-of-tick crash roll - so this
+        // check is immune to the (rare) same-tick margin call that could otherwise halve shares to 0.
+        GameState.Event ev = game.tick();
+        check(ev == GameState.Event.ATE_FOOD, "the 📈 was not eaten as food");
+        java.util.List<GameState.Notice> eat = game.drainNotices();
+        check(eat.stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.STOCK),
+                "eating the 📈 did not fire a STOCK notice (no portfolio share bought)");
+        check(interlude == null, "a stock wrongly opened an interlude");
+        eat.forEach(this::onNotice); // exercise the app's rally toast/juice
+        playRenderAndSnap("share");
+        // A fat portfolio then takes a MARGIN CALL: the CRASH notice must fire and the toast path run.
+        game.grantShares(9);
+        int before = game.shares();
+        game.forceCrash();
+        check(game.shares() == before / 2, "the crash did not halve the portfolio");
+        java.util.List<GameState.Notice> ns = game.drainNotices();
+        check(ns.stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.CRASH), "no CRASH notice fired");
+        ns.forEach(this::onNotice); // exercise the app's margin-call toast/juice
+        playRenderAndSnap("crash");
+    }
+
+    /**
+     * Economy audit for the ~20-min completability target: prove the 📈 rally can build a real
+     * multiplier, then project the total time-to-TRUE-ENDING from the (real) price table and explicit,
+     * labeled assumptions. It fails if the critical path drifts long enough to blow the ~20-min goal -
+     * a regression guard so nobody quietly re-inflates the floor/ending prices. (The full purchase ->
+     * descend -> ending CHAIN is proven end-to-end by the `descend` and `ending` scenarios.)
+     */
+    private void playWin() {
+        // 1) The stock mechanic must be able to rally: force stocks (walls wrap, tail trimmed, so a
+        //    straight walker never dies) and record the peak multiplier reached.
+        beginPlay(11L);
+        game.clearObstacles();
+        game.setStocksEnabled(true);
+        game.setWrapUntilLevel(999); // wrap the edges so a straight walker never crashes on a wall
+        game.setTrimPerLevel(5);     // keep length short so the wrap path never self-collides
+        double peak = 1.0;
+        for (int n = 0; n < 40 && game.status() == GameState.Status.RUNNING; n++) {
+            game.forceStockFood(ahead());
+            step();
+            peak = Math.max(peak, game.stockMultiplier());
+        }
+        check(peak > 1.5, "the 📈 rally never built a meaningful multiplier (peak " + peak + ")");
+        playRenderAndSnap("rally");
+
+        // 2) Critical path to the TRUE ENDING: descend every floor + buy the ending (BARBER is optional).
+        //    Read the LIVE prices from StoreInterlude so this guard tracks any real price change - if
+        //    the numbers are re-inflated there, the projection below actually catches it.
+        int floorSum = StoreInterlude.floorPriceSum();
+        int critical = StoreInterlude.criticalPathScore();
+
+        // 3) Project total minutes with explicit assumptions, for a no-stock worst case and a modest
+        //    rally. score/food folds in the +5 gem (~1 per 5 food, ~half grabbed); s/food is competent
+        //    play (travel + the speed ramp); overhead is warmups + novels + chapters + death/nav slack.
+        double bonus = 1.5;
+        double secPerFood = 1.35;
+        double overheadMin = 3.0 /*2 warmups*/ + 4.0 /*5 novels*/ + 1.5 /*5 chapters*/ + 3.0 /*slack*/;
+        double worstMin = critical / (bonus * 1.0) * secPerFood / 60.0 + overheadMin;
+        double typicalMin = critical / (bonus * 1.3) * secPerFood / 60.0 + overheadMin;
+
+        System.out.printf(java.util.Locale.ROOT, "%n=== ECONOMY (win-path projection) ===%n");
+        System.out.printf(java.util.Locale.ROOT, "  critical-path score: %d  (floors %d + ending %d; barber optional QoL)%n",
+                critical, floorSum, StoreInterlude.endingPrice());
+        System.out.printf(java.util.Locale.ROOT, "  peak 📈 multiplier reached: %.2fx%n", peak);
+        System.out.printf(java.util.Locale.ROOT,
+                "  projected time-to-ending: ~%.0f min (no-stock worst) / ~%.0f min (modest rally)%n",
+                worstMin, typicalMin);
+        System.out.printf(java.util.Locale.ROOT,
+                "  assumptions: %.1f score/food, %.2f s/food, %.0f min interlude+warmup+slack%n",
+                bonus, secPerFood, overheadMin);
+
+        check(worstMin <= 25.0, "worst-case time-to-win too long (" + Math.round(worstMin) + " min)");
+        check(typicalMin <= 21.0, "typical time-to-win drifted past the ~20-min target ("
+                + Math.round(typicalMin) + " min)");
     }
 
     public static void main(String[] args) {

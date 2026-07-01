@@ -106,21 +106,28 @@ public final class SaveStore {
             }
             String key = line.substring(0, eq).trim();
             String val = line.substring(eq + 1).trim();
-            switch (key) {
-                case "high" -> high = Integer.parseInt(val);
-                case "games" -> games = Integer.parseInt(val);
-                case "rank" -> rank = Integer.parseInt(val);
-                case "maxlife" -> bonus = Integer.parseInt(val);
-                case "trim" -> trim = Integer.parseInt(val);
-                case "ended" -> ended = Boolean.parseBoolean(val);
-                case "vn" -> {
-                    for (String id : val.split(",")) {
-                        if (!id.isBlank()) {
-                            vnDone.add(id.trim());
+            // Per-key fault tolerance: a save copied from a different version may carry unknown keys
+            // (ignored below) or a malformed value; skip only the bad line and keep every field that
+            // DOES parse, rather than letting one weird value reset the whole save.
+            try {
+                switch (key) {
+                    case "high" -> high = Integer.parseInt(val);
+                    case "games" -> games = Integer.parseInt(val);
+                    case "rank" -> rank = Integer.parseInt(val);
+                    case "maxlife" -> bonus = Integer.parseInt(val);
+                    case "trim" -> trim = Integer.parseInt(val);
+                    case "ended" -> ended = Boolean.parseBoolean(val);
+                    case "vn" -> {
+                        for (String id : val.split(",")) {
+                            if (!id.isBlank()) {
+                                vnDone.add(id.trim());
+                            }
                         }
                     }
+                    default -> { /* ignore unknown keys (forward-compatible with newer saves) */ }
                 }
-                default -> { /* ignore unknown keys */ }
+            } catch (RuntimeException ignored) {
+                // malformed value from another version -> drop this key, keep the rest
             }
         }
         return new Save(rank, bonus, ended, vnDone, high, games, trim);

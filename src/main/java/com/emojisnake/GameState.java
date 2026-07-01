@@ -29,7 +29,7 @@ public final class GameState {
 
     /** A richer side-channel event for juice/audio (power-ups, synergies, portals, the shed gag). */
     public record Notice(Kind kind, Element element) {
-        public enum Kind { POWERUP, SYNERGY, PORTAL, SHED, RECONNECT, BOOK, FLEE, STORE, BASILISK, CURE, SLOT }
+        public enum Kind { POWERUP, SYNERGY, PORTAL, SHED, RECONNECT, BOOK, FLEE, STORE, BASILISK, CURE, SLOT, STOCK, CRASH }
     }
 
     // Tuning constants.
@@ -98,6 +98,19 @@ public final class GameState {
     // with the won length. Off by default.
     private static final double SLOT_CHANCE = 0.07;
 
+    // Stock-market gag ("cookie clicker" score accelerator): a food respawn occasionally becomes a 📈
+    // you can eat. Each 📈 adds a "share" to a PER-RUN portfolio; your score multiplier is
+    // 1 + shares * STOCK_YIELD, so a long run's score snowballs (the roguelite "rally" that makes the
+    // deep back-room floors reachable without a god-run). But the market can CRASH: rarely - more often
+    // the fatter your portfolio - it halves your shares (a MARGIN CALL), which self-caps the runaway and
+    // fits the predatory-firm theme. All off by default (stocksEnabled = false, shares = 0) so seeded
+    // tests draw zero extra RNG and score exactly as before. Fractional gains are carried in scoreCarry.
+    private static final double STOCK_CHANCE = 0.05;      // fraction of food respawns that become a 📈
+    private static final double STOCK_YIELD = 0.15;       // +15% score per share held
+    private static final int MAX_SHARES = 12;             // cap the portfolio (=> up to 2.8x before a crash)
+    private static final double STOCK_CRASH_BASE = 0.0025; // per-tick crash chance, per share held
+    private static final double STOCK_CRASH_MAX = 0.05;    // ...capped so a fat portfolio isn't instant death
+
     private final int cols;
     private final int rows;
     private final Random rng;
@@ -116,6 +129,10 @@ public final class GameState {
     private int foodFleesLeft;      // remaining flees for the current food (0 = it stays put)
     private boolean gambleEnabled;  // a food can be a 🎰 that adds random length; app opts in
     private boolean foodIsSlot;     // the current food is a 🎰 gamble
+    private boolean stocksEnabled;  // a food can be a 📈 stock; eating it compounds score; app opts in
+    private boolean foodIsStock;    // the current food is a 📈 stock (adds a portfolio share)
+    private int shares;             // per-run portfolio size; score multiplier = 1 + shares*STOCK_YIELD
+    private double scoreCarry;      // fractional score not yet realized (so +15%/share is smooth)
     private int pendingGrowth;      // length still owed (from a slot win), grown one segment per tick
     private int trimPerLevel;       // "haircut": tail segments auto-shed each level-up (0 = off); app opts in
     private Point bonus;            // nullable
@@ -211,6 +228,9 @@ public final class GameState {
         basilisk = false;
         egg = null;
         pendingGrowth = 0;
+        foodIsStock = false;
+        shares = 0;          // the portfolio is per-run: it rallies within a run, then resets
+        scoreCarry = 0;
 
         // Spawn the snake horizontally in the middle, heading right.
         int cy = rows / 2;
@@ -254,6 +274,8 @@ public final class GameState {
         }
     }
     public void setGambleEnabled(boolean enabled) { this.gambleEnabled = enabled; }
+    /** Enable the 📈 stock accelerator (per-run compounding score + crashes); app opts in when awake. */
+    public void setStocksEnabled(boolean enabled) { this.stocksEnabled = enabled; }
 
     /** Owe the snake {@code n} extra segments, grown one per tick (the slot-machine payout). */
     public void addPendingGrowth(int n) {
@@ -265,6 +287,26 @@ public final class GameState {
 
     /** Award bonus points (e.g. surviving a boss interlude). */
     public void addScore(int points) { score += points; }
+
+    /** Per-run score multiplier from the 📈 portfolio: 1.0 with no shares (vanilla). */
+    public double stockMultiplier() { return 1.0 + shares * STOCK_YIELD; }
+
+    /** Current 📈 portfolio size (shares held this run). */
+    public int shares() { return shares; }
+
+    /**
+     * Add an earned reward (food / bonus gem), scaled by GOLD and the 📈 stock multiplier, carrying the
+     * fractional remainder so a +15%/share bonus is realized smoothly despite the integer score. With no
+     * GOLD and no shares this is exactly {@code score += base} - byte-identical to the old code, so the
+     * seeded tests are unchanged.
+     */
+    private void gainScore(int base) {
+        int goldMult = hasStatus(StatusKind.GOLD) ? GOLD_MULT : 1;
+        scoreCarry += base * goldMult * stockMultiplier();
+        int whole = (int) scoreCarry; // floor (scoreCarry is never negative)
+        score += whole;
+        scoreCarry -= whole;
+    }
 
     /** Force the run to end (e.g. lives lost during a boss interlude). */
     public void forceGameOver() { status = Status.GAME_OVER; }
@@ -391,6 +433,7 @@ public final class GameState {
         boolean ateFood = next.equals(food);
         boolean ateBook = ateFood && foodIsBook;            // capture before the respawn overwrites it
         boolean ateSlot = ateFood && foodIsSlot;            // 🎰 gamble for random length
+        boolean ateStock = ateFood && foodIsStock;          // 📈 adds a portfolio share (compounds score)
         boolean ateMeat = ateFood && foodTile == Tile.FOOD_MEAT; // 🍖 can turn you basilisk
         boolean ateEgg = basilisk && egg != null && next.equals(egg); // the cure
         boolean ateBonus = bonus != null && next.equals(bonus);
@@ -421,13 +464,18 @@ public final class GameState {
 
         Event event = Event.MOVED;
         boolean spawnedBonusThisTick = false;
-        int mult = hasStatus(StatusKind.GOLD) ? GOLD_MULT : 1;
 
         if (ateFood) {
-            score += FOOD_POINTS * mult;
+            gainScore(FOOD_POINTS); // scaled by GOLD x2 and the 📈 portfolio (this bite at the old rate)
             foodEaten++;
             food = randomFreeCell();
             assignFoodTile();
+            if (ateStock) {
+                // Buy a share: the multiplier this bite used the OLD portfolio; the new share compounds
+                // every future earning this run. The market can later crash it (maybeCrash()).
+                shares = Math.min(MAX_SHARES, shares + 1);
+                notices.add(new Notice(Notice.Kind.STOCK, null));
+            }
             if (ateBook) {
                 // The book opens the visual novel - surfaced like any other side-event; the app
                 // suspends the snake loop and takes over when it drains this.
@@ -452,11 +500,11 @@ public final class GameState {
             // The 🥚 cures the basilisk: head back to a snake, food back to normal.
             basilisk = false;
             egg = null;
-            score += BONUS_POINTS * mult;
+            gainScore(BONUS_POINTS);
             notices.add(new Notice(Notice.Kind.CURE, null));
             event = Event.ATE_BONUS;
         } else if (ateBonus) {
-            score += BONUS_POINTS * mult;
+            gainScore(BONUS_POINTS);
             bonus = null;
             event = Event.ATE_BONUS;
         } else if (atePowerUp) {
@@ -508,6 +556,7 @@ public final class GameState {
             speedMomentum = Math.max(0, speedMomentum - SPEED_DECAY_PER_TICK);
         }
 
+        maybeCrash();        // the market can correct a fat portfolio (self-caps the stock rally)
         maybeTriggerShed();
         return event;
     }
@@ -701,9 +750,16 @@ public final class GameState {
         if (foodIsSlot) {
             foodTile = Tile.SLOT;
         }
+        // A rare 📈 stock: eating it compounds your score (cookie-clicker rally). Guarded so a game
+        // with stocks off draws no extra RNG.
+        foodIsStock = !foodIsBook && !foodIsSlot && stocksEnabled
+                && rng.nextDouble() < STOCK_CHANCE * chaosScale();
+        if (foodIsStock) {
+            foodTile = Tile.STOCK;
+        }
         // Only a rare LIVING food (worm/mouse/chick) flees; cooked food never runs. Guarded so a
         // vanilla game draws no extra RNG.
-        boolean living = !foodIsBook && !foodIsSlot && fleeingFoodEnabled
+        boolean living = !foodIsBook && !foodIsSlot && !foodIsStock && fleeingFoodEnabled
                 && rng.nextDouble() < LIVING_FOOD_CHANCE * chaosScale();
         if (living) {
             foodTile = Tile.randomLiving(rng);
@@ -731,6 +787,27 @@ public final class GameState {
                 snakeCells.remove(removed);
             }
         }
+    }
+
+    /**
+     * The market can crash: rarely - and more often the fatter the portfolio - halve the shares (a
+     * MARGIN CALL). This self-caps the stock rally and taxes greed, so a huge portfolio never runs
+     * away. Guarded so a game with stocks off (or an empty portfolio) draws zero RNG.
+     */
+    private void maybeCrash() {
+        if (!stocksEnabled || shares <= 0) {
+            return;
+        }
+        double chance = Math.min(STOCK_CRASH_MAX, STOCK_CRASH_BASE * shares * chaosScale());
+        if (rng.nextDouble() < chance) {
+            crash();
+        }
+    }
+
+    /** Apply one market correction: halve the portfolio and surface a CRASH notice. */
+    private void crash() {
+        shares /= 2; // the correction wipes half the portfolio
+        notices.add(new Notice(Notice.Kind.CRASH, null));
     }
 
     // --- the "shed body" gag -------------------------------------------------
@@ -797,6 +874,7 @@ public final class GameState {
         }
 
         boolean ateFood = next.equals(food);
+        boolean ateStock = ateFood && foodIsStock; // 📈 still buys a share while detached
         boolean ateBonus = bonus != null && next.equals(bonus);
         boolean atePowerUp = powerUp != null && next.equals(powerUp);
         boolean grows = ateFood;
@@ -822,19 +900,23 @@ public final class GameState {
         snakeCells.add(next);
 
         Event event = Event.MOVED;
-        int mult = hasStatus(StatusKind.GOLD) ? GOLD_MULT : 1;
         if (ateFood) {
-            score += FOOD_POINTS * mult;
+            gainScore(FOOD_POINTS); // the portfolio earned before shedding still compounds while detached
             foodEaten++;
             food = randomFreeCell();
+            if (ateStock) { // symmetric with tick(): buy the share + surface it, even while detached
+                shares = Math.min(MAX_SHARES, shares + 1);
+                notices.add(new Notice(Notice.Kind.STOCK, null));
+            }
             foodTile = Tile.randomFood(rng);
             foodIsBook = false;
             foodIsSlot = false;   // a detached respawn is always a plain food (no stacked gag)
+            foodIsStock = false;
             foodFleesLeft = 0;
             speedMomentum += 1;
             event = Event.ATE_FOOD;
         } else if (ateBonus) {
-            score += BONUS_POINTS * mult;
+            gainScore(BONUS_POINTS);
             bonus = null;
             event = Event.ATE_BONUS;
         } else if (atePowerUp) {
@@ -868,6 +950,7 @@ public final class GameState {
         if (hasStatus(StatusKind.MAGNET) && food != null) {
             pullFoodTowardHead();
         }
+        maybeCrash(); // the market corrects during the shed gag too (symmetric with tick())
         return event;
     }
 
@@ -1089,5 +1172,24 @@ public final class GameState {
         this.food = p;
         this.foodTile = Tile.SLOT;
         this.foodIsSlot = true;
+    }
+
+    /** Place a 📈 stock on a cell (tests + the {@code --debug} key); eating it adds a portfolio share. */
+    void forceStockFood(Point p) {
+        this.food = p;
+        this.foodTile = Tile.STOCK;
+        this.foodIsStock = true;
+        this.foodIsBook = false; // the special-food flags are mutually exclusive
+        this.foodIsSlot = false;
+    }
+
+    /** Grant portfolio shares directly (tests + the {@code --play} win-path), clamped to the cap. */
+    void grantShares(int n) { this.shares = Math.max(0, Math.min(MAX_SHARES, shares + n)); }
+
+    /** Crash the market now, ignoring the rarity roll (tests): halve the portfolio, fire CRASH. */
+    void forceCrash() {
+        if (shares > 0) {
+            crash();
+        }
     }
 }

@@ -23,6 +23,8 @@ roguelite that talks back, glitches, fakes your death, and sends you down a rabb
 | 📖 | a rare book — drops you into a "slop AI" visual novel (one of 5) |
 | 🏪 | the company store — spend score on power-ups *and* upgrades that last |
 | 🎰 | a slot-machine food — gamble it for length |
+| 📈 | a stock — eat it to compound your score (a per-run "rally"; the market can crash) |
+| 🚪 | the store's "back room" — spend score to descend a floor |
 | 🍖→🐔 / 🥚 | basilisk: roast chicken can turn your head into one; eat the egg to cure it |
 | 🪱🐭🐤 | living food — the only kind that flees when you crowd it |
 | ✂️ | the barber — a permanent "haircut" so your own tail stops strangling you |
@@ -44,9 +46,13 @@ roguelite that talks back, glitches, fakes your death, and sends you down a rabb
   honest choices are the lethal bad ends. Five novels; a wrong (kind) choice costs a life.
 - **It actually goes somewhere** — spend score in the on-board 🏪 on power-ups *and* permanent
   upgrades that stick across every run (Dead-Cells style): vested extra lives and **the barber**, a
-  ✂️ "haircut" that shears your tail as you grow so late-game length stops being an instant death —
-  the thing that makes the deep floors survivable. Buy your way down the back-room floors, finish all
-  five novels, and a real **ending** unlocks. (No spoilers on what you become — earn it.)
+  ✂️ "haircut" that shears your tail as you grow so late-game length stays comfortable. Buy your way
+  down the back-room floors, finish all five novels, and a real **ending** unlocks — reachable in
+  roughly 20 minutes of total play. (No spoilers on what you become — earn it.)
+- **📈 Stocks** — a cookie-clicker rally hidden in Snake: eat a 📈 to buy a "share," and every future
+  bite this run scores more (a compounding multiplier). Ride it and a good run *snowballs* — the thing
+  that makes the deep floors affordable. But this is a predatory firm: the market can **crash** and
+  gut your portfolio (a MARGIN CALL). Greed, taxed.
 - **Rare gags** — once in a long while your whole body just… falls apart. It freezes into a row of
   tombstones and your head pops off on its own. Crawl back and bite your still-living head (the 🗿,
   ringed in green) to pull yourself back together.

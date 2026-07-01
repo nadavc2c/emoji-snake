@@ -71,9 +71,9 @@ class StoreInterludeTest {
         GameState g = new GameState(20, 20, 5L);
         g.addScore(60);
         StoreInterlude shop = shopWithTrim(g, 0);
-        shop.handleKey(KeyCode.DIGIT7); // THE BARBER - 50 pts for the first haircut
+        shop.handleKey(KeyCode.DIGIT7); // THE BARBER - 40 pts for the first haircut
 
-        assertEquals(60 - 50, g.score(), "the haircut is paid for");
+        assertEquals(60 - 40, g.score(), "the haircut is paid for");
         assertEquals(1, shop.trimBought(), "the app is told to bank a permanent haircut level");
     }
 
@@ -91,7 +91,7 @@ class StoreInterludeTest {
     @Test
     void theBarberIsRefusedWhenUnaffordable() {
         GameState g = new GameState(20, 20, 5L);
-        g.addScore(10); // first haircut is 50
+        g.addScore(10); // first haircut is 40
         StoreInterlude shop = shopWithTrim(g, 0);
         shop.handleKey(KeyCode.DIGIT7);
 
@@ -103,10 +103,10 @@ class StoreInterludeTest {
     void theBackRoomDescendsAFloorAndCloses() {
         GameState g = new GameState(20, 20, 5L);
         g.addScore(50);
-        StoreInterlude shop = shop(g, 0, 0, 0); // floor 0 -> price 35
+        StoreInterlude shop = shop(g, 0, 0, 0); // floor 0 -> price 25
         shop.handleKey(KeyCode.DIGIT8);
 
-        assertEquals(50 - 35, g.score(), "the descent costs the floor price");
+        assertEquals(50 - 25, g.score(), "the descent costs the floor price");
         assertTrue(shop.boughtSecret(), "buying it tells the app to descend a floor");
         assertTrue(shop.isDone(), "and closes the shop");
     }

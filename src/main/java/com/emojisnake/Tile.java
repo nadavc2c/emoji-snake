@@ -29,6 +29,7 @@ public enum Tile {
     EGG("1F95A"),       // 🥚 reverts the basilisk
     STORE("1F3EA"),     // 🏪 on-board shop - bump it to buy power-ups
     SLOT("1F3B0"),      // 🎰 gamble food - eating it adds a random amount of length
+    STOCK("1F4C8"),     // 📈 stock - eating it compounds your score (per-run rally; can crash)
 
     // Living food - only these flee (cooked food can't run). Kept out of FOODS.
     WORM("1FAB1"),      // 🪱
@@ -37,6 +38,7 @@ public enum Tile {
 
     HEART("2764"),      // ❤️ store icon for buying an extra life
     SCISSORS("2702"),   // ✂️ store icon for the BARBER (persistent "haircut" upgrade)
+    DOOR("1F6AA"),      // 🚪 store icon for THE BACK ROOM descent (visible; distinct from 🌀 PORTAL)
 
     // Obstacles - a dark, varied set (chosen deterministically by cell position).
     OBSTACLE("1F9F1"),  // 🧱 brick

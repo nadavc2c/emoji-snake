@@ -27,11 +27,13 @@ point. Roles in the game:
 | `1F95A.png` | 🥚    | Egg (reverts the basilisk)    |
 | `1F3EA.png` | 🏪    | On-board store (buy power-ups) |
 | `1F3B0.png` | 🎰    | Gamble food (random length added) |
+| `1F4C8.png` | 📈    | Stock (eating it compounds your score) |
 | `1FAB1.png` | 🪱    | Living food (flees)           |
 | `1F42D.png` | 🐭    | Living food (flees)           |
 | `1F424.png` | 🐤    | Living food (flees)           |
 | `2764.png`  | ❤️    | Store: buy an extra life      |
 | `2702.png`  | ✂️    | Store: THE BARBER (persistent haircut) |
+| `1F6AA.png` | 🚪    | Store: THE BACK ROOM (descend a floor) |
 | `1F9F1.png` | 🧱    | Obstacle (brick)              |
 | `1FAA6.png` | 🪦    | Obstacle (headstone)          |
 | `1F480.png` | 💀    | Obstacle (skull)              |

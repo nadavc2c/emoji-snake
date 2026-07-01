@@ -43,4 +43,33 @@ class SaveStoreTest {
         assertFalse(raw.contains("999"), "the high score must not be readable in the file");
         assertFalse(raw.contains("trim"), "the field keys must not be readable in the file");
     }
+
+    // --- cross-version portability: a save.dat copied from a different version must still load --------
+
+    @Test
+    void aSaveFromAnotherVersionLoadsUnknownKeysIgnoredMissingDefaulted(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("save.dat");
+        // A save written by a different version: carries an unknown future key AND has no trim field.
+        String content = "high=500\ngames=4\nrank=2\nmaxlife=1\nended=true\nvn=a,b\nfuture=42\n";
+        Files.writeString(file, SaveCodec.encode(content)); // verbatim-copy: the digest stays valid
+        SaveStore.Save back = new SaveStore(file).load();
+        assertEquals(500, back.highScore());
+        assertEquals(2, back.rank());
+        assertTrue(back.ended());
+        assertEquals(Set.of("a", "b"), back.vnDone());
+        assertEquals(0, back.trim(), "a missing field defaults; everything known still survives");
+    }
+
+    @Test
+    void aMalformedFieldIsSkippedNotFatalToTheWholeSave(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("save.dat");
+        String content = "high=750\ngames=oops\nrank=3\nended=true\ntrim=2\n"; // games is garbage
+        Files.writeString(file, SaveCodec.encode(content));
+        SaveStore.Save back = new SaveStore(file).load();
+        assertEquals(750, back.highScore(), "a good field survives a sibling's malformed value");
+        assertEquals(3, back.rank());
+        assertEquals(2, back.trim());
+        assertTrue(back.ended());
+        assertEquals(0, back.gamesPlayed(), "only the malformed field falls back to its default");
+    }
 }

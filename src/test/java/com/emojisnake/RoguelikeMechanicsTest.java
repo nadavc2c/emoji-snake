@@ -158,4 +158,70 @@ class RoguelikeMechanicsTest {
         int start = g.length();
         assertEquals(start + 5, eatFiveStraight(g), "with no barber the snake grows classically");
     }
+
+    // --- 📈 the stock-market accelerator -------------------------------------
+
+    @Test
+    void stocksOffByDefaultLeaveScoringVanilla() {
+        GameState g = new GameState(20, 20, 5L); // stocks disabled
+        g.clearObstacles();
+        assertEquals(1.0, g.stockMultiplier(), 1e-9, "no portfolio -> vanilla multiplier");
+        Point head = g.snakeBody().get(0);
+        g.forceFood(head.step(Direction.RIGHT));
+        int before = g.score();
+        g.tick();
+        assertEquals(before + 1, g.score(), "with stocks off, food scores the classic +1");
+        assertEquals(0, g.shares(), "and no shares are ever accrued");
+    }
+
+    @Test
+    void eatingAStockBuysAShareAndRaisesTheMultiplier() {
+        GameState g = new GameState(20, 20, 5L);
+        g.setStocksEnabled(true);
+        g.clearObstacles();
+        Point head = g.snakeBody().get(0);
+        g.forceStockFood(head.step(Direction.RIGHT));
+        int before = g.score();
+        g.tick(); // the stock bite scores at the OLD (1.0) rate, then adds a share
+        assertEquals(1, g.shares(), "eating a 📈 buys one portfolio share");
+        assertEquals(before + 1, g.score(), "the stock bite itself scores like normal food");
+        assertTrue(g.stockMultiplier() > 1.0, "the new share raises the score multiplier");
+        assertTrue(g.drainNotices().stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.STOCK),
+                "a STOCK notice fires so the app can toast the rally");
+    }
+
+    @Test
+    void theStockMultiplierCompoundsFoodScore() {
+        GameState g = new GameState(20, 20, 5L);
+        g.setStocksEnabled(true);
+        g.clearObstacles();
+        g.grantShares(7); // multiplier = 1 + 7*0.15 = 2.05x
+        assertEquals(2.05, g.stockMultiplier(), 1e-9, "7 shares compound to 2.05x");
+        Point head = g.snakeBody().get(0);
+        g.forceFood(head.step(Direction.RIGHT));
+        int before = g.score();
+        g.tick(); // one food at 2.05x -> +2 this bite (the gain is booked before any crash roll)
+        assertEquals(before + 2, g.score(), "food is scored at the portfolio multiplier");
+    }
+
+    @Test
+    void aMarketCrashHalvesThePortfolio() {
+        GameState g = new GameState(20, 20, 5L);
+        g.setStocksEnabled(true);
+        g.grantShares(8); // 1 + 8*0.15 = 2.2x
+        double before = g.stockMultiplier();
+        g.forceCrash();   // MARGIN CALL: the correction halves the shares
+        assertEquals(4, g.shares(), "a crash halves the portfolio");
+        assertTrue(g.stockMultiplier() < before, "and drops the multiplier");
+        assertTrue(g.drainNotices().stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.CRASH),
+                "a CRASH notice fires for the margin-call juice");
+    }
+
+    @Test
+    void thePortfolioIsCapped() {
+        GameState g = new GameState(20, 20, 5L);
+        g.setStocksEnabled(true);
+        g.grantShares(1000);
+        assertTrue(g.shares() <= 12, "the portfolio is capped (was " + g.shares() + ")");
+    }
 }
