@@ -32,12 +32,16 @@ else
   echo "pre-push: gh CLI not found; skipping asset upload."
 fi
 
-# Mirror the fresh zips to the shared Google Drive folder, stamped with the build epoch (monotonic,
-# unique, and it tells you exactly when the build was made). "Remove then copy" so only the newest
-# build lives there. Loud warning but NO failure if the folder isn't mounted.
+# Mirror the fresh zips to the shared Google Drive folder, named with the build version from
+# `git describe` - the git-standard human-readable build id (latest release tag + commits-since +
+# short commit hash, e.g. v1.3-5-g08abcb7). It's traceable to the exact source commit and is SemVer
+# build-metadata style (semver.org allows a commit hash as build metadata). On a release commit it's
+# just the clean tag (v1.3). "Remove then copy" so only the newest build lives there. Loud warning
+# but NO failure if the folder isn't mounted.
 DRIVE_DIR="/g/My Drive/Shared/emoji snake"
 if [ -d "$DRIVE_DIR" ]; then
-  VER=$(date +%s)
+  VER=$(git describe --tags --always --dirty 2>/dev/null)
+  [ -n "$VER" ] || VER=$(git rev-parse --short HEAD 2>/dev/null) # fallback in a tagless checkout
   echo "pre-push: mirroring zips to Google Drive (build $VER) ..."
   rm -f "$DRIVE_DIR"/emoji-snake-*.zip
   if cp "dist/emoji-snake-windows.zip"       "$DRIVE_DIR/emoji-snake-windows-$VER.zip" \
