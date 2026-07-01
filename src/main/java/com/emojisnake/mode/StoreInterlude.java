@@ -19,20 +19,22 @@ import javafx.scene.text.TextAlignment;
  * <ul>
  *   <li><b>This run</b> (consumed): the timed power-ups (1-5).</li>
  *   <li><b>Forever</b> (Dead-Cells meta-progression, persisted by the app): VESTED LIFE (a permanent
- *       +1 max life, capped), THE BACK ROOM (descend one persistent floor, rising price), and the
- *       TRUE ENDING (a red herring until every floor is cleared, then the real "become the firm"
- *       finale).</li>
+ *       +1 max life, capped), THE BARBER (a permanent "haircut" - your tail auto-sheds as you grow,
+ *       so runaway length stops being a death sentence; the real enabler for the deep floors, capped),
+ *       THE BACK ROOM (descend one persistent floor, rising price), and the TRUE ENDING (a red herring
+ *       until every floor is cleared, then the real "become the firm" finale).</li>
  * </ul>
- * Buying a meta item just flags intent ({@link #livesBought()} / {@link #boughtSecret()} /
- * {@link #boughtEnding()}); the app applies + persists it in {@code finishInterlude}. Leave on a
- * direction (your resume heading) or ENTER/ESC.
+ * Buying a meta item just flags intent ({@link #livesBought()} / {@link #trimBought()} /
+ * {@link #boughtSecret()} / {@link #boughtEnding()}); the app applies + persists it in
+ * {@code finishInterlude}. Leave on a direction (your resume heading) or ENTER/ESC.
  */
 public final class StoreInterlude implements Interlude {
 
     private static final int STATUS_TICKS = 140;
-    private static final int[] FLOOR_PRICE = {35, 80, 150, 280, 500}; // to descend FROM floor i
+    private static final int[] FLOOR_PRICE = {35, 80, 150, 260, 420}; // to descend FROM floor i
     private static final int[] LIFE_PRICE = {40, 90};                 // for the 1st / 2nd +max-life
-    private static final int ENDING_PRICE = 250;
+    private static final int[] BARBER_PRICE = {50, 120, 250};         // for the 1st / 2nd / 3rd haircut
+    private static final int ENDING_PRICE = 220;
 
     private final GameState game;
     private final EmojiAtlas atlas;
@@ -40,6 +42,8 @@ public final class StoreInterlude implements Interlude {
     private final int maxFloors;
     private final int lifeBonus;     // +max-life upgrades already banked (persistent)
     private final int maxLifeBonus;
+    private final int trim;          // BARBER "haircut" levels already banked (persistent)
+    private final int maxTrim;
     private final int vnDone;        // novels finished (persistent)
     private final int vnTotal;
 
@@ -47,19 +51,22 @@ public final class StoreInterlude implements Interlude {
     private boolean boughtSecret;    // bought a descent -> app advances a floor + shows the chapter
     private boolean boughtEnding;    // bought the real ending -> app runs the finale
     private int livesBought;         // permanent +max-life upgrades bought this visit
+    private int trimBought;          // permanent +haircut levels bought this visit
     private double elapsed;
     private String flash = "spend your score. some of it even lasts.";
     private double flashT = 3.0;
 
     public StoreInterlude(GameState game, EmojiAtlas atlas, double width, double height,
                           int rank, int maxFloors, int lifeBonus, int maxLifeBonus,
-                          int vnDone, int vnTotal) {
+                          int vnDone, int vnTotal, int trim, int maxTrim) {
         this.game = game;
         this.atlas = atlas;
         this.rank = rank;
         this.maxFloors = maxFloors;
         this.lifeBonus = lifeBonus;
         this.maxLifeBonus = maxLifeBonus;
+        this.trim = trim;
+        this.maxTrim = maxTrim;
         this.vnDone = vnDone;
         this.vnTotal = vnTotal;
     }
@@ -81,6 +88,15 @@ public final class StoreInterlude implements Interlude {
 
     private boolean lifeMaxed() {
         return lifeBonus + livesBought >= maxLifeBonus;
+    }
+
+    private int trimPrice() {
+        int owned = Math.min(trim + trimBought, BARBER_PRICE.length - 1);
+        return BARBER_PRICE[owned];
+    }
+
+    private boolean trimMaxed() {
+        return trim + trimBought >= maxTrim;
     }
 
     private int floorPrice() {
@@ -135,6 +151,11 @@ public final class StoreInterlude implements Interlude {
         return livesBought;
     }
 
+    /** How many permanent BARBER "haircut" levels the player bought this visit. */
+    public int trimBought() {
+        return trimBought;
+    }
+
     @Override
     public void handleKey(KeyCode code) {
         switch (code) {
@@ -144,8 +165,9 @@ public final class StoreInterlude implements Interlude {
             case DIGIT4 -> buyPowerUp(3);
             case DIGIT5 -> buyPowerUp(4);
             case DIGIT6 -> buyLife();
-            case DIGIT7 -> buyDescend();
-            case DIGIT8 -> buyEnding();
+            case DIGIT7 -> buyBarber();
+            case DIGIT8 -> buyDescend();
+            case DIGIT9 -> buyEnding();
             case UP, W -> exitDir = Direction.UP;
             case DOWN, S -> exitDir = Direction.DOWN;
             case LEFT, A -> exitDir = Direction.LEFT;
@@ -179,6 +201,20 @@ public final class StoreInterlude implements Interlude {
         game.addScore(-lifePrice());
         livesBought++;
         flash("VESTED. +1 max life, forever. cling to it.");
+    }
+
+    private void buyBarber() {
+        if (trimMaxed()) {
+            flash("your tail's as trim as the firm allows. vanity has limits.");
+            return;
+        }
+        if (game.score() < trimPrice()) {
+            flash("can't afford the barber. shaggy it is.");
+            return;
+        }
+        game.addScore(-trimPrice());
+        trimBought++;
+        flash("SNIP. your tail sheds as you grow, forever. survival is a haircut.");
     }
 
     private void buyDescend() {
@@ -245,20 +281,25 @@ public final class StoreInterlude implements Interlude {
         row(gc, w, y, rowH, 6, lifeMaxed() ? "VESTED LIFE - MAXED" : "VESTED LIFE  (+1 max life, FOREVER)",
                 lifeMaxed() ? "-" : lifePrice() + " pts", Tile.HEART,
                 !lifeMaxed() && game.score() >= lifePrice(), "#101a26");
-        // 7: descend a floor (the spine)
+        // 7: persistent haircut - the survival meta that makes the deep floors reachable
+        y += rowH;
+        boolean canBarber = !trimMaxed() && game.score() >= trimPrice();
+        row(gc, w, y, rowH, 7, trimMaxed() ? "THE BARBER - MAXED" : "THE BARBER  (✂ shorter tail as you grow, FOREVER)",
+                trimMaxed() ? "-" : trimPrice() + " pts", Tile.SCISSORS, canBarber, "#101a26");
+        // 8: descend a floor (the spine)
         y += rowH;
         boolean canDescend = descendAvailable() && game.score() >= floorPrice();
-        row(gc, w, y, rowH, 7,
+        row(gc, w, y, rowH, 8,
                 descendAvailable() ? "THE BACK ROOM  (descend to Floor " + (rank + 1) + "/" + maxFloors + ")"
                         : "THE BACK ROOM - all floors cleared",
                 descendAvailable() ? floorPrice() + " pts" : "-", Tile.PORTAL, canDescend, "#101a26");
-        // 8: the ending (red herring until the bottom)
+        // 9: the ending (red herring until the bottom)
         y += rowH;
         boolean canEnd = endingUnlocked() && game.score() >= ENDING_PRICE;
         String endLabel = endingUnlocked() ? "★ BECOME THE FIRM ★  (TRUE ENDING)"
                 : !floorsCleared() ? "★ TRUE ENDING ★  (clear all floors first)"
                 : "★ TRUE ENDING ★  (read all novels: " + vnDone + "/" + vnTotal + ")";
-        row(gc, w, y, rowH, 8, endLabel,
+        row(gc, w, y, rowH, 9, endLabel,
                 endingUnlocked() ? ENDING_PRICE + " pts" : "???", Tile.BOSS, canEnd, "#1c1024");
 
         if (flashT > 0) {
@@ -270,7 +311,7 @@ public final class StoreInterlude implements Interlude {
         gc.setTextAlign(TextAlignment.CENTER);
         gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 14));
         gc.setFill(Color.web("#9fb39f"));
-        gc.fillText("press 1-8 to buy   ·   press a direction to slither off", w / 2, h - 28);
+        gc.fillText("press 1-9 to buy   ·   press a direction to slither off", w / 2, h - 28);
     }
 
     private void row(GraphicsContext gc, double w, double y, double rowH, int num, String label,

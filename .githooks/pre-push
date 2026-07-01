@@ -1,0 +1,15 @@
+#!/bin/sh
+# Auto-refresh the distributable on every push, so dist/emoji-snake-windows.zip always
+# matches the code being pushed (no need to remember to repackage). Non-blocking: if the
+# packaging fails, warn but still let the push through.
+#
+# Enable on a fresh clone with:  git config core.hooksPath .githooks
+echo "pre-push: refreshing dist/emoji-snake-windows.zip ..."
+if command -v pwsh >/dev/null 2>&1; then
+  PS=pwsh
+else
+  PS=powershell.exe
+fi
+"$PS" -NoProfile -ExecutionPolicy Bypass -File ./package.ps1 \
+  || echo "pre-push: WARNING - packaging failed; pushing code anyway (run .\\package.ps1 by hand)."
+exit 0

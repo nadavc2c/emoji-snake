@@ -35,6 +35,7 @@ public enum Tile {
     CHICK("1F424"),     // 🐤
 
     HEART("2764"),      // ❤️ store icon for buying an extra life
+    SCISSORS("2702"),   // ✂️ store icon for the BARBER (persistent "haircut" upgrade)
 
     // Obstacles - a dark, varied set (chosen deterministically by cell position).
     OBSTACLE("1F9F1"),  // 🧱 brick

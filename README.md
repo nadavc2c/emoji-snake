@@ -21,6 +21,7 @@ It starts gentle. Then, after a couple of games, it *wakes up*.
 | 🎰 | a slot-machine food - gamble it for length |
 | 🍖→🐔 / 🥚 | basilisk: roast chicken can turn your head into one; eat the egg to cure it |
 | 🪱🐭🐤 | living food - the only kind that flees when you crowd it |
+| ✂️ | the barber - a permanent "haircut" so your own tail stops strangling you |
 
 ## Controls
 
@@ -49,8 +50,10 @@ it's game over - usually. Your best score is saved. There may also be a secret. 
   play straight (senpai, rival-to-lover, the wholesome intern) - but the morality is *inverted*:
   the kind, honest choices are the lethal bad ends. Five novels; a wrong choice costs a life.
 - **It actually goes somewhere** - spend score in the on-board 🏪 on power-ups *and* permanent
-  upgrades that stick across every run (Dead-Cells style). Buy your way down the back-room floors,
-  finish all five novels, and a real **ending** unlocks. (No spoilers on what you become.)
+  upgrades that stick across every run (Dead-Cells style): vested extra lives and **the barber**, a
+  ✂️ "haircut" that shears your tail as you grow so late-game length stops being an instant death -
+  the thing that makes the deep floors survivable. Buy your way down the back-room floors, finish all
+  five novels, and a real **ending** unlocks. (No spoilers on what you become.)
 - **Per-context music** - the runtime synth swaps to a fitting public-domain **classical** piece for
   each takeover - doom for the boss, Für Elise in the shop, Pachelbel for the novel, Ode to Joy for
   the finale - all played as note data through the same chip synth. Still zero audio files.

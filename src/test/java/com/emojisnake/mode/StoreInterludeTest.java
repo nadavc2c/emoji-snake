@@ -13,17 +13,24 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Logic of the on-board shop against a real headless {@link GameState} (atlas is render-only, so null
- * is fine). Item slots: 1-5 power-ups, 6 VESTED LIFE (persistent +max life), 7 THE BACK ROOM (descend
- * a floor), 8 the TRUE ENDING (locked until every floor is cleared AND every novel is read).
+ * is fine). Item slots: 1-5 power-ups, 6 VESTED LIFE (persistent +max life), 7 THE BARBER (persistent
+ * "haircut"), 8 THE BACK ROOM (descend a floor), 9 the TRUE ENDING (locked until every floor is
+ * cleared AND every novel is read).
  */
 class StoreInterludeTest {
 
     private static final int FLOORS = 5;
     private static final int NOVELS = 5;
+    private static final int MAXTRIM = 3;
 
-    /** Shop at a given persistent rank / banked life bonus / novels-read count. */
+    /** Shop at a given persistent rank / banked life bonus / novels-read count (no haircut banked). */
     private static StoreInterlude shop(GameState g, int rank, int lifeBonus, int vnDone) {
-        return new StoreInterlude(g, null, 640, 696, rank, FLOORS, lifeBonus, 2, vnDone, NOVELS);
+        return new StoreInterlude(g, null, 640, 696, rank, FLOORS, lifeBonus, 2, vnDone, NOVELS, 0, MAXTRIM);
+    }
+
+    /** Shop with a given number of BARBER "haircut" levels already banked. */
+    private static StoreInterlude shopWithTrim(GameState g, int trim) {
+        return new StoreInterlude(g, null, 640, 696, 0, FLOORS, 0, 2, 0, NOVELS, trim, MAXTRIM);
     }
 
     @Test
@@ -60,11 +67,44 @@ class StoreInterludeTest {
     }
 
     @Test
+    void theBarberIsAPersistentPurchaseFlaggedForTheApp() {
+        GameState g = new GameState(20, 20, 5L);
+        g.addScore(60);
+        StoreInterlude shop = shopWithTrim(g, 0);
+        shop.handleKey(KeyCode.DIGIT7); // THE BARBER - 50 pts for the first haircut
+
+        assertEquals(60 - 50, g.score(), "the haircut is paid for");
+        assertEquals(1, shop.trimBought(), "the app is told to bank a permanent haircut level");
+    }
+
+    @Test
+    void theBarberIsRefusedOnceMaxed() {
+        GameState g = new GameState(20, 20, 5L);
+        g.addScore(500);
+        StoreInterlude shop = shopWithTrim(g, MAXTRIM); // already at the haircut cap
+        shop.handleKey(KeyCode.DIGIT7);
+
+        assertEquals(500, g.score(), "a maxed haircut charges nothing");
+        assertEquals(0, shop.trimBought());
+    }
+
+    @Test
+    void theBarberIsRefusedWhenUnaffordable() {
+        GameState g = new GameState(20, 20, 5L);
+        g.addScore(10); // first haircut is 50
+        StoreInterlude shop = shopWithTrim(g, 0);
+        shop.handleKey(KeyCode.DIGIT7);
+
+        assertEquals(10, g.score(), "an unaffordable haircut charges nothing");
+        assertEquals(0, shop.trimBought());
+    }
+
+    @Test
     void theBackRoomDescendsAFloorAndCloses() {
         GameState g = new GameState(20, 20, 5L);
         g.addScore(50);
         StoreInterlude shop = shop(g, 0, 0, 0); // floor 0 -> price 35
-        shop.handleKey(KeyCode.DIGIT7);
+        shop.handleKey(KeyCode.DIGIT8);
 
         assertEquals(50 - 35, g.score(), "the descent costs the floor price");
         assertTrue(shop.boughtSecret(), "buying it tells the app to descend a floor");
@@ -76,7 +116,7 @@ class StoreInterludeTest {
         GameState g = new GameState(20, 20, 5L);
         g.addScore(1000);
         StoreInterlude shop = shop(g, 0, 0, NOVELS); // novels read, but floors not cleared
-        shop.handleKey(KeyCode.DIGIT8);
+        shop.handleKey(KeyCode.DIGIT9);
 
         assertEquals(1000, g.score(), "the locked ending charges nothing");
         assertFalse(shop.boughtEnding());
@@ -88,7 +128,7 @@ class StoreInterludeTest {
         GameState g = new GameState(20, 20, 5L);
         g.addScore(1000);
         StoreInterlude shop = shop(g, FLOORS, 0, NOVELS - 1); // all floors, but one novel short
-        shop.handleKey(KeyCode.DIGIT8);
+        shop.handleKey(KeyCode.DIGIT9);
 
         assertEquals(1000, g.score(), "incomplete novels keep the ending locked");
         assertFalse(shop.boughtEnding(), "you must finish all novels first");
@@ -99,7 +139,7 @@ class StoreInterludeTest {
         GameState g = new GameState(20, 20, 5L);
         g.addScore(1000);
         StoreInterlude shop = shop(g, FLOORS, 0, NOVELS); // floors cleared AND novels read
-        shop.handleKey(KeyCode.DIGIT8);
+        shop.handleKey(KeyCode.DIGIT9);
 
         assertTrue(shop.boughtEnding(), "with both prerequisites met, the ending is finally real");
         assertTrue(shop.isDone());

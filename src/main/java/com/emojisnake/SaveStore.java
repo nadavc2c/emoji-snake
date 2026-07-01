@@ -16,34 +16,41 @@ import java.util.Set;
  *   <li>{@code rank} - back-room floors descended (roguelite meta-progression);</li>
  *   <li>{@code maxLifeBonus} - permanent +max-life upgrades banked;</li>
  *   <li>{@code ended} - reached the true ending;</li>
- *   <li>{@code vnDone} - ids of visual novels finished.</li>
+ *   <li>{@code vnDone} - ids of visual novels finished;</li>
+ *   <li>{@code trim} - banked BARBER "haircut" levels (persistent survival upgrade).</li>
  * </ul>
  * On first load it migrates (and removes) the old split files {@code highscore.txt}/{@code progress.txt}/
  * {@code meta.txt} if present. Fails silent on I/O errors.
  */
 public final class SaveStore {
 
-    /** Immutable snapshot of all persisted state. */
+    /** Immutable snapshot of all persisted state. {@code trim} = banked BARBER "haircut" levels. */
     public record Save(int rank, int maxLifeBonus, boolean ended, Set<String> vnDone,
-                       int highScore, int gamesPlayed) {
+                       int highScore, int gamesPlayed, int trim) {
         public Save {
             vnDone = (vnDone == null) ? Set.of() : Set.copyOf(vnDone);
         }
+        /** Convenience: no BARBER yet (older/short forms default the haircut level to 0). */
+        public Save(int rank, int maxLifeBonus, boolean ended, Set<String> vnDone,
+                    int highScore, int gamesPlayed) {
+            this(rank, maxLifeBonus, ended, vnDone, highScore, gamesPlayed, 0);
+        }
         public Save(int rank, int maxLifeBonus, boolean ended, Set<String> vnDone) {
-            this(rank, maxLifeBonus, ended, vnDone, 0, 0);
+            this(rank, maxLifeBonus, ended, vnDone, 0, 0, 0);
         }
         public Save(int rank, int maxLifeBonus, boolean ended) {
-            this(rank, maxLifeBonus, ended, Set.of(), 0, 0);
+            this(rank, maxLifeBonus, ended, Set.of(), 0, 0, 0);
         }
-        public Save withRank(int r) { return new Save(r, maxLifeBonus, ended, vnDone, highScore, gamesPlayed); }
-        public Save withMaxLifeBonus(int b) { return new Save(rank, b, ended, vnDone, highScore, gamesPlayed); }
-        public Save withEnded(boolean e) { return new Save(rank, maxLifeBonus, e, vnDone, highScore, gamesPlayed); }
-        public Save withHighScore(int h) { return new Save(rank, maxLifeBonus, ended, vnDone, h, gamesPlayed); }
-        public Save withGamesPlayed(int g) { return new Save(rank, maxLifeBonus, ended, vnDone, highScore, g); }
+        public Save withRank(int r) { return new Save(r, maxLifeBonus, ended, vnDone, highScore, gamesPlayed, trim); }
+        public Save withMaxLifeBonus(int b) { return new Save(rank, b, ended, vnDone, highScore, gamesPlayed, trim); }
+        public Save withEnded(boolean e) { return new Save(rank, maxLifeBonus, e, vnDone, highScore, gamesPlayed, trim); }
+        public Save withHighScore(int h) { return new Save(rank, maxLifeBonus, ended, vnDone, h, gamesPlayed, trim); }
+        public Save withGamesPlayed(int g) { return new Save(rank, maxLifeBonus, ended, vnDone, highScore, g, trim); }
+        public Save withTrim(int t) { return new Save(rank, maxLifeBonus, ended, vnDone, highScore, gamesPlayed, t); }
         public Save withVnDone(String id) {
             var s = new HashSet<>(vnDone);
             s.add(id);
-            return new Save(rank, maxLifeBonus, ended, s, highScore, gamesPlayed);
+            return new Save(rank, maxLifeBonus, ended, s, highScore, gamesPlayed, trim);
         }
     }
 
@@ -76,7 +83,8 @@ public final class SaveStore {
         try {
             String content = "high=" + s.highScore() + "\ngames=" + s.gamesPlayed()
                     + "\nrank=" + s.rank() + "\nmaxlife=" + s.maxLifeBonus()
-                    + "\nended=" + s.ended() + "\nvn=" + String.join(",", s.vnDone()) + "\n";
+                    + "\nended=" + s.ended() + "\ntrim=" + s.trim()
+                    + "\nvn=" + String.join(",", s.vnDone()) + "\n";
             Files.writeString(file, SaveCodec.encode(content));
         } catch (IOException ignored) {
             // best-effort persistence
@@ -88,6 +96,7 @@ public final class SaveStore {
         int games = 0;
         int rank = 0;
         int bonus = 0;
+        int trim = 0;
         boolean ended = false;
         var vnDone = new HashSet<String>();
         for (String line : content.split("\n")) {
@@ -102,6 +111,7 @@ public final class SaveStore {
                 case "games" -> games = Integer.parseInt(val);
                 case "rank" -> rank = Integer.parseInt(val);
                 case "maxlife" -> bonus = Integer.parseInt(val);
+                case "trim" -> trim = Integer.parseInt(val);
                 case "ended" -> ended = Boolean.parseBoolean(val);
                 case "vn" -> {
                     for (String id : val.split(",")) {
@@ -113,7 +123,7 @@ public final class SaveStore {
                 default -> { /* ignore unknown keys */ }
             }
         }
-        return new Save(rank, bonus, ended, vnDone, high, games);
+        return new Save(rank, bonus, ended, vnDone, high, games, trim);
     }
 
     /** Fold the pre-consolidation split files into one save.dat, then remove them. */
@@ -122,7 +132,7 @@ public final class SaveStore {
         int high = legacyInt(dir.resolve("highscore.txt"));
         int games = legacyInt(dir.resolve("progress.txt"));
         Save meta = legacyMeta(dir.resolve("meta.txt"));
-        Save merged = new Save(meta.rank(), meta.maxLifeBonus(), meta.ended(), meta.vnDone(), high, games);
+        Save merged = new Save(meta.rank(), meta.maxLifeBonus(), meta.ended(), meta.vnDone(), high, games, meta.trim());
         if (high != 0 || games != 0 || merged.rank() != 0 || merged.ended() || !merged.vnDone().isEmpty()) {
             save(merged); // there was real legacy data -> write the unified file
         }

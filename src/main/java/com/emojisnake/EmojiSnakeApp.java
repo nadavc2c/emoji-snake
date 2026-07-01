@@ -69,6 +69,7 @@ public class EmojiSnakeApp extends Application {
     // Forgiveness + the slow "wake up" reveal.
     private static final int BASE_MAX_LIVES = 3;
     private static final int MAX_LIFE_BONUS = 2;       // persistent +max-life upgrades you can bank
+    private static final int MAX_TRIM = 3;             // persistent BARBER "haircut" levels you can bank
     private static final int MAX_FLOORS = 5;           // back-room descents to the CEO ending
     private static final int META_UNLOCK_GAMES = 2;   // first 2 games stay straight; meta wakes after
     private static final int WRAP_UNTIL_LEVEL = 2;     // early walls wrap instead of kill
@@ -390,6 +391,12 @@ public class EmojiSnakeApp extends Application {
                 persist();
                 lives = Math.min(maxLives(), lives + store.livesBought());
             }
+            // Apply any BARBER "haircut" levels bought this visit (persistent; takes effect immediately).
+            if (store.trimBought() > 0) {
+                meta = meta.withTrim(Math.min(MAX_TRIM, meta.trim() + store.trimBought()));
+                persist();
+                game.setTrimPerLevel(meta.trim());
+            }
             if (store.boughtEnding()) {
                 meta = meta.withEnded(true); // cleared every floor + bought the way out
                 persist();
@@ -524,7 +531,7 @@ public class EmojiSnakeApp extends Application {
     private StoreInterlude newStore() {
         return new StoreInterlude(game, atlas, WIDTH, HEIGHT,
                 meta.rank(), MAX_FLOORS, meta.maxLifeBonus(), MAX_LIFE_BONUS,
-                meta.vnDone().size(), VisualNovels.all().size());
+                meta.vnDone().size(), VisualNovels.all().size(), meta.trim(), MAX_TRIM);
     }
 
     private void onKonami() {
@@ -994,10 +1001,13 @@ public class EmojiSnakeApp extends Application {
         game.setMechanicsEnabled(metaUnlocked);   // power-ups, synergies, portals
         game.setGagsEnabled(metaUnlocked);        // the rare "shed body" gag
         game.setStoreEnabled(metaUnlocked);       // the on-board shop only exists once awake
-        game.setBooksEnabled(metaUnlocked);
+        // Books deliver the 5 required novels; once every novel is read they'd only interrupt the long
+        // score-farming runs the deep floors need, so retire them at 5/5.
+        game.setBooksEnabled(metaUnlocked && meta.vnDone().size() < VisualNovels.all().size());
         game.setFleeingFoodEnabled(metaUnlocked); // food bolts when you crowd it
         game.setBasiliskEnabled(metaUnlocked);    // roasted chicken can hatch the cockatrice
         game.setGambleEnabled(metaUnlocked);      // a food can be a 🎰 slot machine
+        game.setTrimPerLevel(metaUnlocked ? meta.trim() : 0); // the persistent BARBER haircut
         // The gaslight is ONLY for the plain pre-wake games: it caps a too-long plain run (walls in
         // your face burn your lives) to push you to the wake-up. Once awake, the chaos does that job.
         game.setGaslightEnabled(!metaUnlocked);
@@ -1225,6 +1235,7 @@ public class EmojiSnakeApp extends Application {
         gc.setTextAlign(TextAlignment.CENTER);
         String best = "Best " + highScore
                 + (meta.rank() > 0 ? "   Floor " + meta.rank() + "/" + MAX_FLOORS : "")
+                + (meta.trim() > 0 ? "   ✂L" + meta.trim() : "")
                 + (meta.ended() ? " ★" : "");
         gc.fillText(glitch.garble(best), WIDTH / 2.0 - j, mid - j);
 
@@ -1487,8 +1498,8 @@ public class EmojiSnakeApp extends Application {
 
     private void renderStoreSnapshotAndExit() {
         game = new GameState(COLS, ROWS, 42L);
-        game.addScore(40); // give the shopper something to spend
-        StoreInterlude store = new StoreInterlude(game, atlas, WIDTH, HEIGHT, 2, MAX_FLOORS, 1, MAX_LIFE_BONUS, 3, 5);
+        game.addScore(160); // give the shopper something to spend (shows several rows affordable)
+        StoreInterlude store = new StoreInterlude(game, atlas, WIDTH, HEIGHT, 2, MAX_FLOORS, 1, MAX_LIFE_BONUS, 3, 5, 1, MAX_TRIM);
         for (int i = 0; i < 30; i++) {
             store.update(1.0 / 60.0);
         }
@@ -1580,6 +1591,8 @@ public class EmojiSnakeApp extends Application {
         runOne(only, "book-death", this::playBookDeath);
         runOne(only, "store-buy", this::playStoreBuy);
         runOne(only, "store-exit", this::playStoreExit);
+        runOne(only, "barber", this::playBarber);
+        runOne(only, "book-retire", this::playBookRetire);
         runOne(only, "basilisk", this::playBasilisk);
         runOne(only, "fleeing", this::playFleeing);
         runOne(only, "funny67", this::playFunny67);
@@ -1809,6 +1822,42 @@ public class EmojiSnakeApp extends Application {
         playRenderAndSnap("after");
     }
 
+    /** Eat {@code n} food in a straight clear line with the given haircut level; return final length. */
+    private int eatStraight(int n, int trim) {
+        beginPlay(7L);
+        game.clearObstacles();      // guarantee a clear runway so the streak never crashes
+        game.setTrimPerLevel(trim);
+        for (int i = 0; i < n && interlude == null && game.status() == GameState.Status.RUNNING; i++) {
+            game.forceFood(ahead());
+            step();
+        }
+        return game.length();
+    }
+
+    private void playBarber() {
+        int classic = eatStraight(5, 0);       // no barber: START_LENGTH + 5
+        int trimmed = eatStraight(5, 2);       // barber L2: sheds 2 on the level-up
+        check(trimmed < classic, "the BARBER did not shorten the snake (" + trimmed + " vs " + classic + ")");
+        int floored = eatStraight(5, 9);       // an aggressive haircut still respects the floor length
+        check(floored >= 5, "the BARBER trimmed below the minimum length (" + floored + ")");
+        playRenderAndSnap("barbered");
+    }
+
+    private void playBookRetire() {
+        beginPlay(5L);
+        metaUnlocked = true;
+        meta = new SaveStore.Save(0, 0, false);           // no novels read yet
+        applyMetaGameFlags();
+        check(game.isBooksEnabled(), "books should still drop while novels remain unread");
+        java.util.Set<String> allVn = new java.util.HashSet<>();
+        for (com.emojisnake.vn.Story s : VisualNovels.all()) {
+            allVn.add(s.id());
+        }
+        meta = new SaveStore.Save(0, 0, false, allVn);    // every novel read -> retire books
+        applyMetaGameFlags();
+        check(!game.isBooksEnabled(), "books must retire once all novels are read");
+    }
+
     private void playStoreExit() {
         beginPlay(5L);
         game.forceStore(ahead()); // store dead ahead; head is wedged against it heading RIGHT
@@ -1902,7 +1951,7 @@ public class EmojiSnakeApp extends Application {
         game.forceStore(ahead());
         step(); // store opens via the STORE notice
         check(interlude instanceof StoreInterlude, "store did not open");
-        interlude.handleKey(KeyCode.DIGIT7); // THE BACK ROOM - descend a floor
+        interlude.handleKey(KeyCode.DIGIT8); // THE BACK ROOM - descend a floor (7 is now the BARBER)
         finishInterlude();
         check(meta.rank() == 1, "descending did not advance the persistent floor (rank " + meta.rank() + ")");
         check(interlude instanceof SecretInterlude, "the floor chapter did not open");
@@ -1933,7 +1982,7 @@ public class EmojiSnakeApp extends Application {
         game.forceStore(ahead());
         step();
         check(interlude instanceof StoreInterlude, "store did not open");
-        interlude.handleKey(KeyCode.DIGIT8); // try to buy the ending
+        interlude.handleKey(KeyCode.DIGIT9); // try to buy the ending
         check(!((StoreInterlude) interlude).boughtEnding(), "the ending must stay locked until all 5 novels are read");
         check(game.score() == 400, "the locked ending must not charge");
     }
@@ -1950,7 +1999,7 @@ public class EmojiSnakeApp extends Application {
         game.forceStore(ahead());
         step();
         check(interlude instanceof StoreInterlude, "store did not open");
-        interlude.handleKey(KeyCode.DIGIT8); // ★ BECOME THE FIRM ★ (the real ending)
+        interlude.handleKey(KeyCode.DIGIT9); // ★ BECOME THE FIRM ★ (the real ending)
         finishInterlude();
         check(meta.ended(), "buying the true ending did not mark the game beaten");
         check(interlude instanceof EndingInterlude, "the CEO finale did not open");

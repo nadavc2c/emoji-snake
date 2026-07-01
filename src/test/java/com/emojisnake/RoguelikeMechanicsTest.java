@@ -118,4 +118,44 @@ class RoguelikeMechanicsTest {
         g.tick(); // head -> (11,10); food drifts one step closer
         assertEquals(new Point(14, 10), g.food(), "magnet should pull food one cell toward the head");
     }
+
+    /** Eat five food straight down the clear centre row, returning the final snake length. */
+    private static int eatFiveStraight(GameState g) {
+        g.clearObstacles();
+        for (int x = 11; x <= 15; x++) { // five food -> one level-up (level 2)
+            g.forceFood(new Point(x, 10));
+            g.tick();
+        }
+        return g.length();
+    }
+
+    @Test
+    void theBarberHaircutTrimsTheTailOnLevelUp() {
+        // Control: no haircut -> classic +1 per food.
+        GameState plain = new GameState(20, 20, 5L);
+        int start = plain.length();
+        assertEquals(start + 5, eatFiveStraight(plain), "without the barber the snake grows +1 per food");
+
+        // Barbered: same five food, but the level-up sheds trimPerLevel tail segments.
+        GameState cut = new GameState(20, 20, 5L);
+        cut.setTrimPerLevel(2);
+        int trimmed = eatFiveStraight(cut);
+        assertEquals(start + 5 - 2, trimmed, "the barber sheds 2 tail segments on the level-up");
+        assertTrue(trimmed < plain.length(), "the haircut keeps the snake shorter");
+    }
+
+    @Test
+    void theBarberNeverTrimsBelowTheFloorLength() {
+        GameState g = new GameState(20, 20, 5L);
+        g.setTrimPerLevel(9); // an absurdly aggressive haircut
+        assertTrue(eatFiveStraight(g) >= 5,
+                "the barber must never trim below the minimum length (was " + g.length() + ")");
+    }
+
+    @Test
+    void trimIsOffByDefaultSoClassicGrowthIsUnchanged() {
+        GameState g = new GameState(20, 20, 5L);
+        int start = g.length();
+        assertEquals(start + 5, eatFiveStraight(g), "with no barber the snake grows classically");
+    }
 }

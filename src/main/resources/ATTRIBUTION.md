@@ -30,6 +30,7 @@ point. Roles in the game:
 | `1F42D.png` | 🐭    | Living food (flees)           |
 | `1F424.png` | 🐤    | Living food (flees)           |
 | `2764.png`  | ❤️    | Store: buy an extra life      |
+| `2702.png`  | ✂️    | Store: THE BARBER (persistent haircut) |
 | `1F9F1.png` | 🧱    | Obstacle (brick)              |
 | `1FAA6.png` | 🪦    | Obstacle (headstone)          |
 | `1F480.png` | 💀    | Obstacle (skull)              |

@@ -63,6 +63,12 @@ public final class GameState {
     private static final int MIN_SHED_LENGTH = 6;   // only worth it once there's a real body to shed
     private static final double SHED_CHANCE = 0.0014; // per tick once eligible - deliberately very rare
 
+    // The persistent "haircut" (BARBER) meta-upgrade: each level-up sheds `trimPerLevel` tail segments
+    // (down to MIN_TRIM_LENGTH), so runaway length - the real late-game killer - stops being a death
+    // sentence and the deep back-room floors become reachable. Score (food count) is untouched; only
+    // the hazard shrinks. Off by default (trimPerLevel = 0), so seeded tests are byte-identical.
+    private static final int MIN_TRIM_LENGTH = 5;   // never trim the snake shorter than this
+
     // The rare "book" pickup ("bookworm"): a food respawn occasionally becomes a 📖 instead. Eating
     // it opens a slop AI visual-novel interlude (handled app-side via the BOOK notice). Off by default.
     private static final double BOOK_CHANCE = 0.06; // fraction of food respawns that become a book
@@ -111,6 +117,7 @@ public final class GameState {
     private boolean gambleEnabled;  // a food can be a 🎰 that adds random length; app opts in
     private boolean foodIsSlot;     // the current food is a 🎰 gamble
     private int pendingGrowth;      // length still owed (from a slot win), grown one segment per tick
+    private int trimPerLevel;       // "haircut": tail segments auto-shed each level-up (0 = off); app opts in
     private Point bonus;            // nullable
     private int bonusTicksLeft;
 
@@ -236,6 +243,8 @@ public final class GameState {
     public void setFleeingFoodEnabled(boolean enabled) { this.fleeingFoodEnabled = enabled; }
     public void setStoreEnabled(boolean enabled) { this.storeEnabled = enabled; }
     public void setBasiliskEnabled(boolean enabled) { this.basiliskEnabled = enabled; }
+    /** The persistent "haircut": tail segments auto-shed per level-up (0 = off, capped by the app). */
+    public void setTrimPerLevel(int n) { this.trimPerLevel = Math.max(0, n); }
 
     /** Enable the gaslight wall and roll this run's score threshold (40..45). */
     public void setGaslightEnabled(boolean enabled) {
@@ -468,6 +477,12 @@ public final class GameState {
                     snakeCells.remove(removed);
                 }
             }
+        }
+
+        // Persistent "haircut": on each level-up, auto-shed a few tail segments so length stays
+        // manageable (the deep-game enabler). Runs after growth so a fresh food still counts.
+        if (ateFood && trimPerLevel > 0 && foodEaten % BONUS_EVERY_N_FOODS == 0) {
+            trimTail(trimPerLevel);
         }
 
         if (bonus != null && !spawnedBonusThisTick && --bonusTicksLeft <= 0) {
@@ -704,6 +719,18 @@ public final class GameState {
      */
     private double chaosScale() {
         return Math.min(3.0, 1.0 + (level() - 1) * 0.2);
+    }
+
+    /** Shed up to {@code n} tail segments (never below {@link #MIN_TRIM_LENGTH}) - the "haircut". */
+    private void trimTail(int n) {
+        for (int i = 0; i < n && snake.size() > MIN_TRIM_LENGTH; i++) {
+            Point removed = snake.removeLast();
+            // Keep snakeCells in sync, but only free the cell if no other segment still sits on it
+            // (GHOST can briefly put a Point in the deque twice) - mirrors the tail-removal in tick().
+            if (!snake.contains(removed)) {
+                snakeCells.remove(removed);
+            }
+        }
     }
 
     // --- the "shed body" gag -------------------------------------------------
@@ -963,6 +990,8 @@ public final class GameState {
     public int cols() { return cols; }
     public int rows() { return rows; }
     public int score() { return score; }
+    /** Whether the rare 📖 can still spawn (the app retires it once every novel is read). */
+    public boolean isBooksEnabled() { return booksEnabled; }
     public Status status() { return status; }
     public Point food() { return food; }
     public Point bonus() { return bonus; }
