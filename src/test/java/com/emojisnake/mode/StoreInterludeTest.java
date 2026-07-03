@@ -23,14 +23,14 @@ class StoreInterludeTest {
     private static final int NOVELS = 5;
     private static final int MAXTRIM = 3;
 
-    /** Shop at a given persistent rank / banked life bonus / novels-read count (no haircut banked). */
+    /** Shop at a given per-run floor / banked life bonus / novels-read count (no haircut, not yet ended). */
     private static StoreInterlude shop(GameState g, int rank, int lifeBonus, int vnDone) {
-        return new StoreInterlude(g, null, 640, 696, rank, FLOORS, lifeBonus, 2, vnDone, NOVELS, 0, MAXTRIM);
+        return new StoreInterlude(g, null, 640, 696, rank, FLOORS, lifeBonus, 2, vnDone, NOVELS, 0, MAXTRIM, false);
     }
 
     /** Shop with a given number of BARBER "haircut" levels already banked. */
     private static StoreInterlude shopWithTrim(GameState g, int trim) {
-        return new StoreInterlude(g, null, 640, 696, 0, FLOORS, 0, 2, 0, NOVELS, trim, MAXTRIM);
+        return new StoreInterlude(g, null, 640, 696, 0, FLOORS, 0, 2, 0, NOVELS, trim, MAXTRIM, false);
     }
 
     @Test
@@ -144,6 +144,19 @@ class StoreInterludeTest {
         assertTrue(shop.boughtEnding(), "with both prerequisites met, the ending is finally real");
         assertTrue(shop.isDone());
         assertTrue(g.score() < 1000, "and it costs you");
+    }
+
+    @Test
+    void theEndingCannotBeReboughtOnceYouveAlreadyWon() {
+        GameState g = new GameState(20, 20, 5L);
+        g.addScore(1000);
+        // Prerequisites met AND already ended: the "keep grinding" run must not re-charge for the finale.
+        StoreInterlude shop =
+                new StoreInterlude(g, null, 640, 696, FLOORS, FLOORS, 0, 2, NOVELS, NOVELS, 0, MAXTRIM, true);
+        shop.handleKey(KeyCode.DIGIT9);
+
+        assertFalse(shop.boughtEnding(), "you already run the firm - the ending is not for sale again");
+        assertEquals(1000, g.score(), "an already-won ending charges nothing");
     }
 
     @Test

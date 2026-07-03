@@ -25,7 +25,8 @@ class VisualNovelInterludeTest {
     }
 
     private static VisualNovelInterlude vn() {
-        return new VisualNovelInterlude(billable(), null, true);
+        // null rng => authored choice order, so the fixed-digit routes below stay stable.
+        return new VisualNovelInterlude(billable(), null, true, null);
     }
 
     /** Reveal the current line (1st key fast-forwards the typewriter) then select choice {@code digit}. */
@@ -61,6 +62,28 @@ class VisualNovelInterludeTest {
 
         assertFalse(vn.died());
         assertEquals(1, vn.reward(), "a meek/neutral exit barely pays");
+    }
+
+    @Test
+    void choicesAreShuffledButStayAValidPermutation() {
+        // With a real rng the display order must be a permutation of the authored choices (every route
+        // still reachable) and must NOT always be identity (so the +20 answer isn't always slot 1).
+        boolean sawNonIdentity = false;
+        for (long seed = 0; seed < 8; seed++) {
+            VisualNovelInterlude v =
+                    new VisualNovelInterlude(billable(), null, true, new java.util.Random(seed));
+            int[] order = v.choiceOrder();
+            assertEquals(3, order.length, "the billable intro offers 3 choices");
+            boolean[] seen = new boolean[order.length];
+            for (int slot : order) {
+                assertFalse(seen[slot], "the display order must be a permutation (no duplicate)");
+                seen[slot] = true;
+            }
+            if (order[0] != 0 || order[1] != 1 || order[2] != 2) {
+                sawNonIdentity = true;
+            }
+        }
+        assertTrue(sawNonIdentity, "the shuffle never reordered the choices across 8 seeds");
     }
 
     @Test

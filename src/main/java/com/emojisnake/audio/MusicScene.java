@@ -11,6 +11,8 @@ package com.emojisnake.audio;
  *   <li>{@code VN} - Pachelbel's Canon in D (romantic, calm) for the dating-sim.</li>
  *   <li>{@code SECRET} - an eerie whole-tone descent.</li>
  *   <li>{@code ENDING} - Beethoven's "Ode to Joy" (triumphant, darkly ironic).</li>
+ *   <li>{@code CRASH} - NOT music: a harsh, glitchy system-error drone for the fake-crash gag
+ *       (the melodic bed cuts out and this ugly buzz takes over - "just a crash sound").</li>
  * </ul>
  */
 public enum MusicScene {
@@ -19,5 +21,6 @@ public enum MusicScene {
     SHOP,
     VN,
     SECRET,
-    ENDING
+    ENDING,
+    CRASH
 }

@@ -95,10 +95,6 @@ public final class DodgeBossInterlude implements Interlude {
         return elapsed >= DURATION || hits >= startingLives;
     }
 
-    public boolean survived() {
-        return hits < startingLives && elapsed >= DURATION;
-    }
-
     public int hits() {
         return hits;
     }

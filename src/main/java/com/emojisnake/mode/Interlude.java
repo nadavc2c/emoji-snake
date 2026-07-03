@@ -22,4 +22,16 @@ public interface Interlude {
     void handleKey(KeyCode code);
 
     boolean isDone();
+
+    /**
+     * The keys that should ADVANCE / dismiss an interlude page. Deliberately NOT "any key": utility
+     * keys (mute, screenshot, function keys, ...) must never skip a beat the player is still reading -
+     * so a paged screen only moves on a play key (Space / Enter / a direction).
+     */
+    static boolean isAdvanceKey(KeyCode code) {
+        return switch (code) {
+            case SPACE, ENTER, UP, DOWN, LEFT, RIGHT, W, A, S, D -> true;
+            default -> false;
+        };
+    }
 }

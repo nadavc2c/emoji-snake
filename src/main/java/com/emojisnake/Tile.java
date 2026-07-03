@@ -30,6 +30,7 @@ public enum Tile {
     STORE("1F3EA"),     // 🏪 on-board shop - bump it to buy power-ups
     SLOT("1F3B0"),      // 🎰 gamble food - eating it adds a random amount of length
     STOCK("1F4C8"),     // 📈 stock - eating it compounds your score (per-run rally; can crash)
+    BOX("1F4E6"),       // 📦 "walls closing in" food - eats/grows like food, but shrinks the window
 
     // Living food - only these flee (cooked food can't run). Kept out of FOODS.
     WORM("1FAB1"),      // 🪱

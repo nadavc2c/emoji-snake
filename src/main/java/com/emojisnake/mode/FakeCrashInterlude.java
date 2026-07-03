@@ -39,10 +39,8 @@ public final class FakeCrashInterlude implements Interlude {
 
     @Override
     public void handleKey(KeyCode code) {
-        // Any key hurries past the trace, but you can't actually escape it early.
-        if (elapsed < traceDuration) {
-            elapsed = traceDuration;
-        }
+        // Deliberately inert: the crash owns its full timeline. A panicking key-mash must NOT skip the
+        // trace or fast-forward to the reveal - "you don't get to crash. only i do." plays out in full.
     }
 
     @Override

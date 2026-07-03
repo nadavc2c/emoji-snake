@@ -29,7 +29,7 @@ public final class GameState {
 
     /** A richer side-channel event for juice/audio (power-ups, synergies, portals, the shed gag). */
     public record Notice(Kind kind, Element element) {
-        public enum Kind { POWERUP, SYNERGY, PORTAL, SHED, RECONNECT, BOOK, FLEE, STORE, BASILISK, CURE, SLOT, STOCK, CRASH }
+        public enum Kind { POWERUP, SYNERGY, PORTAL, SHED, RECONNECT, BOOK, FLEE, STORE, BASILISK, CURE, SLOT, STOCK, CRASH, BOX }
     }
 
     // Tuning constants.
@@ -61,7 +61,10 @@ public final class GameState {
     // The rare "shed body" gag: the body freezes into terrain, the head pops off and must crawl
     // back to bite its own (still-living) neck to reassemble.
     private static final int MIN_SHED_LENGTH = 6;   // only worth it once there's a real body to shed
-    private static final double SHED_CHANCE = 0.0014; // per tick once eligible - deliberately very rare
+    private static final double SHED_CHANCE = 0.0011; // per tick once eligible - deliberately very rare
+    // ...and a hard cooldown after a shed so it can't fire again for a good while (it was chaining 3x in
+    // a minute at deep levels where chaosScale multiplies the odds). ~260 ticks ≈ 30-40s of play.
+    private static final int SHED_COOLDOWN_TICKS = 260;
 
     // The persistent "haircut" (BARBER) meta-upgrade: each level-up sheds `trimPerLevel` tail segments
     // (down to MIN_TRIM_LENGTH), so runaway length - the real late-game killer - stops being a death
@@ -105,11 +108,19 @@ public final class GameState {
     // the fatter your portfolio - it halves your shares (a MARGIN CALL), which self-caps the runaway and
     // fits the predatory-firm theme. All off by default (stocksEnabled = false, shares = 0) so seeded
     // tests draw zero extra RNG and score exactly as before. Fractional gains are carried in scoreCarry.
-    private static final double STOCK_CHANCE = 0.05;      // fraction of food respawns that become a 📈
+    private static final double STOCK_CHANCE = 0.08;      // fraction of food respawns that become a 📈 (steadier)
     private static final double STOCK_YIELD = 0.15;       // +15% score per share held
     private static final int MAX_SHARES = 12;             // cap the portfolio (=> up to 2.8x before a crash)
-    private static final double STOCK_CRASH_BASE = 0.0025; // per-tick crash chance, per share held
-    private static final double STOCK_CRASH_MAX = 0.05;    // ...capped so a fat portfolio isn't instant death
+    // Crashes are gentler now (they were wiping fresh portfolios too fast): a small portfolio is safe,
+    // and the per-tick, per-share odds are ~halved so shares last long enough to feel like a rally.
+    private static final int STOCK_CRASH_MIN_SHARES = 3;   // no margin call until the portfolio is real
+    private static final double STOCK_CRASH_BASE = 0.0012; // per-tick crash chance, per share held
+    private static final double STOCK_CRASH_MAX = 0.04;    // ...capped so a fat portfolio isn't instant death
+
+    // The "walls closing in" box (📦): a food respawn occasionally becomes a 📦. It eats/grows/scores
+    // exactly like normal food, but fires a BOX notice the app turns into the window-shrink gag - so the
+    // shrink has a coherent, on-board cause instead of firing at random on any food. Off by default.
+    private static final double BOX_CHANCE = 0.05;        // fraction of food respawns that become a 📦
 
     private final int cols;
     private final int rows;
@@ -131,6 +142,8 @@ public final class GameState {
     private boolean foodIsSlot;     // the current food is a 🎰 gamble
     private boolean stocksEnabled;  // a food can be a 📈 stock; eating it compounds score; app opts in
     private boolean foodIsStock;    // the current food is a 📈 stock (adds a portfolio share)
+    private boolean boxEnabled;     // a food can be a 📦; eating it triggers the window-shrink; app opts in
+    private boolean foodIsBox;      // the current food is a 📦 ("walls closing in")
     private int shares;             // per-run portfolio size; score multiplier = 1 + shares*STOCK_YIELD
     private double scoreCarry;      // fractional score not yet realized (so +15%/share is smooth)
     private int pendingGrowth;      // length still owed (from a slot win), grown one segment per tick
@@ -178,6 +191,7 @@ public final class GameState {
     // The "shed body" gag (default off, app opts in via setGagsEnabled).
     private boolean gagsEnabled;
     private boolean detached;        // body is frozen terrain; only the head moves
+    private int shedCooldown;        // ticks until a shed may fire again (throttles the gag frequency)
     private final List<Point> frozenBody = new ArrayList<>(); // ordered neck -> tail
     private final Set<Point> frozenCells = new HashSet<>();   // O(1) lethal lookup for the frozen body
     private Point reconnectNode;     // the frozen neck; biting it reassembles the snake
@@ -220,6 +234,7 @@ public final class GameState {
         notices.clear();
 
         detached = false;
+        shedCooldown = 0;
         frozenBody.clear();
         frozenCells.clear();
         reconnectNode = null;
@@ -229,6 +244,7 @@ public final class GameState {
         egg = null;
         pendingGrowth = 0;
         foodIsStock = false;
+        foodIsBox = false;
         shares = 0;          // the portfolio is per-run: it rallies within a run, then resets
         scoreCarry = 0;
 
@@ -276,6 +292,8 @@ public final class GameState {
     public void setGambleEnabled(boolean enabled) { this.gambleEnabled = enabled; }
     /** Enable the 📈 stock accelerator (per-run compounding score + crashes); app opts in when awake. */
     public void setStocksEnabled(boolean enabled) { this.stocksEnabled = enabled; }
+    /** Enable the 📦 box food (eating it fires the BOX notice -> the app's window-shrink gag). */
+    public void setBoxEnabled(boolean enabled) { this.boxEnabled = enabled; }
 
     /** Owe the snake {@code n} extra segments, grown one per tick (the slot-machine payout). */
     public void addPendingGrowth(int n) {
@@ -434,6 +452,7 @@ public final class GameState {
         boolean ateBook = ateFood && foodIsBook;            // capture before the respawn overwrites it
         boolean ateSlot = ateFood && foodIsSlot;            // 🎰 gamble for random length
         boolean ateStock = ateFood && foodIsStock;          // 📈 adds a portfolio share (compounds score)
+        boolean ateBox = ateFood && foodIsBox;              // 📦 grows like food, but shrinks the window
         boolean ateMeat = ateFood && foodTile == Tile.FOOD_MEAT; // 🍖 can turn you basilisk
         boolean ateEgg = basilisk && egg != null && next.equals(egg); // the cure
         boolean ateBonus = bonus != null && next.equals(bonus);
@@ -486,6 +505,10 @@ public final class GameState {
                 // Pull the lever: the app's SlotInterlude spins, then calls addPendingGrowth() with the
                 // win. The eat itself doesn't grow - it's a gamble.
                 notices.add(new Notice(Notice.Kind.SLOT, null));
+            }
+            if (ateBox) {
+                // 📦 grew you like any food; the app turns this notice into the window-shrink gag.
+                notices.add(new Notice(Notice.Kind.BOX, null));
             }
             if (bonus == null && foodEaten % BONUS_EVERY_N_FOODS == 0) {
                 bonus = randomFreeCell();
@@ -757,9 +780,16 @@ public final class GameState {
         if (foodIsStock) {
             foodTile = Tile.STOCK;
         }
+        // A 📦 "box" food: eats/grows like normal food but fires the window-shrink gag. Guarded so a
+        // game with the box off draws no extra RNG.
+        foodIsBox = !foodIsBook && !foodIsSlot && !foodIsStock && boxEnabled
+                && rng.nextDouble() < BOX_CHANCE * chaosScale();
+        if (foodIsBox) {
+            foodTile = Tile.BOX;
+        }
         // Only a rare LIVING food (worm/mouse/chick) flees; cooked food never runs. Guarded so a
         // vanilla game draws no extra RNG.
-        boolean living = !foodIsBook && !foodIsSlot && !foodIsStock && fleeingFoodEnabled
+        boolean living = !foodIsBook && !foodIsSlot && !foodIsStock && !foodIsBox && fleeingFoodEnabled
                 && rng.nextDouble() < LIVING_FOOD_CHANCE * chaosScale();
         if (living) {
             foodTile = Tile.randomLiving(rng);
@@ -795,8 +825,8 @@ public final class GameState {
      * away. Guarded so a game with stocks off (or an empty portfolio) draws zero RNG.
      */
     private void maybeCrash() {
-        if (!stocksEnabled || shares <= 0) {
-            return;
+        if (!stocksEnabled || shares < STOCK_CRASH_MIN_SHARES) {
+            return; // a small, fresh portfolio is safe - crashes only start once you're genuinely rich
         }
         double chance = Math.min(STOCK_CRASH_MAX, STOCK_CRASH_BASE * shares * chaosScale());
         if (rng.nextDouble() < chance) {
@@ -816,6 +846,10 @@ public final class GameState {
     private void maybeTriggerShed() {
         if (!gagsEnabled || detached) {
             return;
+        }
+        if (shedCooldown > 0) {
+            shedCooldown--;
+            return; // still in the post-shed quiet window - can't chain another one yet
         }
         if (snake.size() < MIN_SHED_LENGTH || hasStatus(StatusKind.GHOST)) {
             return; // need a real body, and never mid-grace (it would be unreadable)
@@ -848,6 +882,7 @@ public final class GameState {
         snakeCells.add(head);
         turnQueue.clear();
         detached = true;
+        shedCooldown = SHED_COOLDOWN_TICKS; // no back-to-back sheds; the clock resumes after reconnect
         notices.add(new Notice(Notice.Kind.SHED, null));
     }
 
@@ -873,10 +908,12 @@ public final class GameState {
             return Event.MOVED; // the RECONNECT notice drives the reward juice
         }
 
-        boolean ateFood = next.equals(food);
-        boolean ateStock = ateFood && foodIsStock; // 📈 still buys a share while detached
+        // While split, only PLAIN food (and the 📦 box - just food) is edible; the mechanic pickups
+        // (📖 book / 🎰 slot / 📈 stock) and power-ups PASS THROUGH untouched, so a split can't waste a
+        // book (which would lock the ending) or farm free power-ups. Bonus gems stay grabbable (points).
+        boolean specialFood = foodIsBook || foodIsSlot || foodIsStock;
+        boolean ateFood = next.equals(food) && !specialFood;
         boolean ateBonus = bonus != null && next.equals(bonus);
-        boolean atePowerUp = powerUp != null && next.equals(powerUp);
         boolean grows = ateFood;
         Point tail = snake.peekLast();
 
@@ -904,14 +941,11 @@ public final class GameState {
             gainScore(FOOD_POINTS); // the portfolio earned before shedding still compounds while detached
             foodEaten++;
             food = randomFreeCell();
-            if (ateStock) { // symmetric with tick(): buy the share + surface it, even while detached
-                shares = Math.min(MAX_SHARES, shares + 1);
-                notices.add(new Notice(Notice.Kind.STOCK, null));
-            }
             foodTile = Tile.randomFood(rng);
             foodIsBook = false;
             foodIsSlot = false;   // a detached respawn is always a plain food (no stacked gag)
             foodIsStock = false;
+            foodIsBox = false;
             foodFleesLeft = 0;
             speedMomentum += 1;
             event = Event.ATE_FOOD;
@@ -919,11 +953,8 @@ public final class GameState {
             gainScore(BONUS_POINTS);
             bonus = null;
             event = Event.ATE_BONUS;
-        } else if (atePowerUp) {
-            applyPowerUp(powerUpElement);
-            powerUp = null;
-            powerUpElement = null;
         }
+        // Power-ups are NOT consumed while detached - the head passes over them (see specialFood above).
 
         if (!grows) {
             if (pendingGrowth > 0) {
@@ -1182,6 +1213,19 @@ public final class GameState {
         this.foodIsBook = false; // the special-food flags are mutually exclusive
         this.foodIsSlot = false;
     }
+
+    /** Place a 📦 box food on a cell (tests + {@code --debug}); eating it grows AND fires the BOX notice. */
+    void forceBoxFood(Point p) {
+        this.food = p;
+        this.foodTile = Tile.BOX;
+        this.foodIsBox = true;
+        this.foodIsBook = false; // the special-food flags are mutually exclusive
+        this.foodIsSlot = false;
+        this.foodIsStock = false;
+    }
+
+    /** True while the current food is the 📦 box (tests). */
+    boolean isBoxFood() { return foodIsBox; }
 
     /** Grant portfolio shares directly (tests + the {@code --play} win-path), clamped to the cap. */
     void grantShares(int n) { this.shares = Math.max(0, Math.min(MAX_SHARES, shares + n)); }

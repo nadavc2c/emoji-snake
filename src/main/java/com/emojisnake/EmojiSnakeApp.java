@@ -75,14 +75,15 @@ public class EmojiSnakeApp extends Application {
     private static final int MAX_FLOORS = 5;           // back-room descents to the CEO ending
     private static final int META_UNLOCK_GAMES = 2;   // first 2 games stay straight; meta wakes after
     private static final int WRAP_UNTIL_LEVEL = 2;     // early walls wrap instead of kill
-    private static final double FAKEOUT_CHANCE = 1.0 / 3.0; // a "death" that glitches into a revive
+    private static final double FAKEOUT_CHANCE = 1.0 / 3.0; // a "death" that glitches into a revive (a liked gag)
+    private static final double BOSS_MERCY_CHANCE = 0.4; // after taking boss hits, sometimes it "spits one back"
     private static final int BOSS_EVERY_LEVELS = 3;    // a genre-shift boss fight every N levels
-    private static final double FAKECRASH_CHANCE = 0.22; // on a non-boss level-up (meta only)
-    private static final double TOAST_SECONDS = 2.6;   // how long an in-play message lingers (readable)
+    private static final double FAKECRASH_CHANCE = 0.22; // on a non-boss level-up (meta only; once per run)
+    private static final double TOAST_SECONDS = 4.2;   // how long an in-play message lingers (readable)
+    private static final double TOAST_LONG = 6.0;      // for the ones you really need to read (MARGIN CALL...)
     private static final int[] FUNNY_SCORES = {42, 67, 69, 420, 666, 1337}; // emoji-themed score gags
     private static final int SECRET_SCORE = 30;        // the Frog-Fractions ↓↓↓ secret unlocks past this
     private static final double INPUT_LOCKOUT = 0.45;  // ignore input this long after a stop (anti-mash)
-    private static final double SHRINK_CHANCE = 0.03;  // per food (meta), scaled by level - window gag
 
     // Dark / cruel / depressive-funny copy (only seen once the meta layer is awake).
     private static final String[] FAKEOUT_MSGS = {
@@ -144,8 +145,9 @@ public class EmojiSnakeApp extends Application {
     private Interlude interlude;      // active takeover (boss fight / fake crash), or null
     private int lastLevel = 1;        // for level-up detection
     private int lastScore;            // for funny-score gag crossing detection (67/69/420...)
+    private boolean fakeCrashUsedThisRun; // the fake-crash gag fires at most once per run
+    private int floorThisRun;         // back-room floors descended THIS run (resets on death; gates the ending)
     private final java.util.Set<String> vnSeenThisRun = new java.util.HashSet<>(); // no repeat VNs per run
-    private String lastNovelId;       // avoid an immediate repeat across a cycle boundary
     private Stage stage;              // kept for the window-shrink gag
     private boolean shrinking;        // a window-shrink animation is in progress
     private double inputLockoutT;     // brief deafness after a stop, so mashed keys don't carry over
@@ -342,24 +344,37 @@ public class EmojiSnakeApp extends Application {
         }
         if (level % BOSS_EVERY_LEVELS == 0) {
             interlude = new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives);
-        } else if (rng.nextDouble() < FAKECRASH_CHANCE) {
+        } else if (!fakeCrashUsedThisRun && rng.nextDouble() < FAKECRASH_CHANCE) {
+            fakeCrashUsedThisRun = true; // at most one fake crash per run - it loses its bite if repeated
+            sound.crash();               // a harsh jolt as the fake fatal-error takes over the screen
             interlude = new FakeCrashInterlude();
         }
     }
 
     private void finishInterlude() {
         if (interlude instanceof DodgeBossInterlude boss) {
-            lives = Math.max(0, lives - boss.hits());
+            int hits = boss.hits();
+            lives = Math.max(0, lives - hits); // every hit costs a life - always
             if (lives <= 0) {
                 game.forceGameOver();
                 realGameOver();
-            } else if (boss.survived()) {
-                lives = Math.min(maxLives(), lives + 1); // a mercy life for surviving
+            } else if (hits == 0) {
+                // Flawless dodge: a clear, earned reward.
                 game.addScore(25);
                 game.applyStatus(StatusKind.GHOST, 60);
-                resumeAfterScreen("survived. barely.", false);
+                resumeAfterScreen("boss dodged flawlessly! +25 & a ghost.", false);
             } else {
-                resumeAfterScreen("the boss took a bite.", true);
+                // It bit you: SAY what it cost (the resume prompt shows your remaining lives below). Then
+                // the "random lives" gag you like - it SOMETIMES coughs a life back, announced clearly so
+                // the logic reads as a wink, not a mystery.
+                boolean mercy = lives < maxLives() && rng.nextDouble() < BOSS_MERCY_CHANCE;
+                if (mercy) {
+                    lives = Math.min(maxLives(), lives + 1);
+                    resumeAfterScreen("bitten " + hits + "x... but it spat a life back (+1).", true);
+                } else {
+                    resumeAfterScreen("the boss bit you " + hits + "x. -" + hits
+                            + (hits == 1 ? " life." : " lives."), true);
+                }
             }
         } else if (interlude instanceof VisualNovelInterlude vn) {
             // Finishing a novel (any ending) marks it read - completing all 5 gates the TRUE ENDING.
@@ -406,14 +421,16 @@ public class EmojiSnakeApp extends Application {
                 return;
             }
             if (store.boughtSecret()) {
-                int floor = Math.min(MAX_FLOORS, meta.rank() + 1); // descend one persistent floor
-                meta = meta.withRank(floor);
+                floorThisRun = Math.min(MAX_FLOORS, floorThisRun + 1); // descend one floor THIS run
+                // meta.rank is the DEEPEST floor ever reached - a persistent reward (starting shares),
+                // NOT the ending gate. The gate is floorThisRun, which resets on death (re-descend).
+                meta = meta.withRank(Math.max(meta.rank(), floorThisRun));
                 persist();
                 Direction safe = safeStoreExit(); // pre-set a safe heading so the post-chapter prompt
                 if (safe != null) {               // can't resume back into the wedged-against shop
                     game.setInitialDirection(safe);
                 }
-                interlude = new SecretInterlude(floor, MAX_FLOORS); // the floor's chapter
+                interlude = new SecretInterlude(floorThisRun, MAX_FLOORS); // the floor's chapter
                 return;
             }
             // The head is wedged against the solid 🏪, so pre-set a SAFE default heading (never into the
@@ -428,11 +445,13 @@ public class EmojiSnakeApp extends Application {
             }
             resumeAfterScreen("thanks for shopping.", false);
         } else if (interlude instanceof EndingInterlude) {
-            // The finale dismissed: end the run on a win screen (the meta progress is already saved).
-            game.forceGameOver();
-            realGameOver();
-            gameOverTitle = "★ YOU ARE THE FIRM ★";
-            gameOverQuote = "the snake ate everything. even the ending. (saved)";
+            // You won - but the firm never closes. Keep the run alive so you can keep grinding; the win
+            // is already saved (meta.ended). The head is wedged against the shop, so pick a safe heading.
+            Direction safe = safeStoreExit();
+            if (safe != null) {
+                game.setInitialDirection(safe);
+            }
+            resumeAfterScreen("★ you are the firm ★  now keep grinding.", false);
         } else if (interlude instanceof SlotInterlude slot) {
             game.addPendingGrowth(slot.amount());
             if (slot.exitDirection() != null) {
@@ -495,17 +514,17 @@ public class EmojiSnakeApp extends Application {
         saveStore.save(meta);
     }
 
-    /** Pick a novel not yet seen this run, so a single run never repeats one until all 5 are cycled. */
+    /**
+     * Pick a novel not seen this run. Returns {@code null} once every novel HAS been seen this run, so a
+     * single run NEVER repeats one - a later book just acts as plain food (no VN) instead of re-opening
+     * one. (Books retire across runs at 5/5 anyway, so this only bites a run that reads all 5 in one go.)
+     */
     private com.emojisnake.vn.Story pickNovel() {
         if (vnSeenThisRun.size() >= VisualNovels.all().size()) {
-            vnSeenThisRun.clear(); // cycled through every novel -> start a fresh cycle...
-            if (lastNovelId != null) {
-                vnSeenThisRun.add(lastNovelId); // ...but never immediately repeat the last one
-            }
+            return null;
         }
         com.emojisnake.vn.Story s = VisualNovels.pickExcluding(rng, vnSeenThisRun);
         vnSeenThisRun.add(s.id());
-        lastNovelId = s.id();
         return s;
     }
 
@@ -526,14 +545,19 @@ public class EmojiSnakeApp extends Application {
         if (il instanceof SecretInterlude) {
             return MusicScene.SECRET;
         }
-        return MusicScene.NORMAL; // fake crash etc. - keep the groove
+        if (il instanceof FakeCrashInterlude) {
+            return MusicScene.CRASH; // no melody - the melodic bed cuts to a harsh system-error drone
+        }
+        return MusicScene.NORMAL;
     }
 
     /** The shop, seeded with the current persistent meta (floors descended, +life upgrades, novels read). */
     private StoreInterlude newStore() {
+        // Seeded with THIS run's floor progress (not the persistent deepest) so the descent price ladder
+        // and the ending gate both re-earn each run - the back room doesn't carry across a death.
         return new StoreInterlude(game, atlas, WIDTH, HEIGHT,
-                meta.rank(), MAX_FLOORS, meta.maxLifeBonus(), MAX_LIFE_BONUS,
-                meta.vnDone().size(), VisualNovels.all().size(), meta.trim(), MAX_TRIM);
+                floorThisRun, MAX_FLOORS, meta.maxLifeBonus(), MAX_LIFE_BONUS,
+                meta.vnDone().size(), VisualNovels.all().size(), meta.trim(), MAX_TRIM, meta.ended());
     }
 
     private void onKonami() {
@@ -569,11 +593,8 @@ public class EmojiSnakeApp extends Application {
         }
         checkFunnyScore();
         maybeSecretHint();
-        // Window-shrink only on a plain food eat that did NOT open an interlude - otherwise it would
-        // resize the window mid-slot/VN and clip it.
-        if (event == GameState.Event.ATE_FOOD && interlude == null) {
-            maybeWindowShrink();
-        }
+        // The window-shrink ("walls closing in") gag is no longer a random roll on any food - it now
+        // fires only when the snake eats the dedicated 📦 box food, via the BOX notice in onNotice().
     }
 
     /** One-time nudge that the Frog-Fractions secret exists, once you've earned some score. */
@@ -585,21 +606,15 @@ public class EmojiSnakeApp extends Application {
     }
 
     /**
-     * The "food that shrinks the box" gag: rarely, eating squeezes the whole window down for a few
-     * seconds, then restores it. Window-only theatre; never during the headless self-checks.
+     * The "walls closing in" gag: eating a 📦 box food squeezes the whole window down for a few seconds,
+     * then restores it. Window-only theatre; a no-op during the headless self-checks or mid-shrink.
      */
-    private void maybeWindowShrink() {
-        if (smoke || stage == null || shrinking || !metaUnlocked) {
+    private void windowShrink() {
+        if (smoke || stage == null || shrinking) {
             return;
         }
-        if (rng.nextDouble() < SHRINK_CHANCE * Math.min(3, game.level())) {
-            windowShrink();
-        }
-    }
-
-    private void windowShrink() {
         shrinking = true;
-        toast("the walls are closing in.");
+        toast("📦 the walls are closing in.", TOAST_LONG);
         final double small = 0.62;
         // Window chrome (title bar + borders): outer size minus the WIDTH×HEIGHT client area.
         final double chromeW = stage.getWidth() - WIDTH;
@@ -715,7 +730,8 @@ public class EmojiSnakeApp extends Application {
                     double[] nc = cellCenter(neck);
                     particles.burst(nc[0], nc[1], (int) (40 * juice()), Color.web("#7ee081"), 260);
                 }
-                toast(metaUnlocked ? "you came apart. bite your neck." : "you fell apart! eat the 🗿");
+                toast(metaUnlocked ? "you came apart. crawl back and bite your neck (🗿)."
+                        : "you fell apart! eat the 🗿 to put yourself back together.", TOAST_LONG);
             }
             case RECONNECT -> {
                 sound.bonus();
@@ -731,7 +747,12 @@ public class EmojiSnakeApp extends Application {
                 sound.bonus();
                 particles.burst(c[0], c[1], (int) (34 * juice()), Color.web("#d7b16a"), 240);
                 camera.kick(0.05 * juice());
-                interlude = new VisualNovelInterlude(pickNovel(), vnArt, metaUnlocked);
+                com.emojisnake.vn.Story novel = pickNovel();
+                if (novel != null) {
+                    interlude = new VisualNovelInterlude(novel, vnArt, metaUnlocked);
+                } else {
+                    toast("you've read every file in the firm. (for now.)");
+                }
             }
             case FLEE -> {
                 // The worm bolted. A quick whoosh where it landed.
@@ -756,7 +777,8 @@ public class EmojiSnakeApp extends Application {
                 camera.addTrauma(0.4 * juice());
                 camera.kick(0.07 * juice());
                 headPop.restart();
-                toast(metaUnlocked ? "you are become chicken." : "BAWK! eat the 🥚 to change back!");
+                toast(metaUnlocked ? "you are become chicken. eat the 🥚 to change back."
+                        : "BAWK! eat the 🥚 to change back!", TOAST_LONG);
             }
             case CURE -> {
                 sound.bonus();
@@ -770,6 +792,13 @@ public class EmojiSnakeApp extends Application {
                     sound.bonus();
                     interlude = new SlotInterlude(atlas);
                 }
+            }
+            case BOX -> {
+                // 📦 grew you like normal food; now the "walls closing in" gag squeezes the window.
+                sound.eat();
+                particles.burst(c[0], c[1], (int) (24 * juice()), Color.web("#c8a06a"), 220);
+                camera.kick(0.04 * juice());
+                windowShrink(); // no-op when headless / already shrinking
             }
             case STOCK -> {
                 // Bought a share: the portfolio (score multiplier) just grew. Green "up" juice.
@@ -787,8 +816,9 @@ public class EmojiSnakeApp extends Application {
                 camera.addTrauma(0.35 * juice());
                 camera.kick(0.06 * juice());
                 toast(metaUnlocked
-                        ? String.format(Locale.ROOT, "📉 MARGIN CALL  ·  down to %.1fx", game.stockMultiplier())
-                        : "📉 the market crashed!");
+                        ? String.format(Locale.ROOT, "📉 MARGIN CALL - the market halved your shares (now %.1fx)",
+                                game.stockMultiplier())
+                        : "📉 the market crashed! your shares were halved.", TOAST_LONG);
             }
         }
     }
@@ -814,8 +844,13 @@ public class EmojiSnakeApp extends Application {
     }
 
     private void toast(String msg) {
+        toast(msg, TOAST_SECONDS);
+    }
+
+    /** Show a toast for a custom duration - use {@link #TOAST_LONG} for lines that are easy to miss. */
+    private void toast(String msg, double seconds) {
         toast = msg;
-        toastTimer = TOAST_SECONDS;
+        toastTimer = seconds;
     }
 
     private double juice() {
@@ -846,6 +881,7 @@ public class EmojiSnakeApp extends Application {
         camera.addTrauma(0.85 * juice());
         camera.kick(0.09 * juice());
         hitstopFrames = 6;
+        memeFlashTimer = 0; // dying mid-"6 7" cancels the meme flash so the lost-life prompt is clean
 
         boolean fakeout = metaUnlocked && rng.nextDouble() < FAKEOUT_CHANCE;
         if (fakeout) {
@@ -864,6 +900,7 @@ public class EmojiSnakeApp extends Application {
     }
 
     private void realGameOver() {
+        memeFlashTimer = 0; // never leave a stray "6 7" flash bleeding onto the game-over screen
         gameOverTitle = metaUnlocked ? pick(GAMEOVER_MSGS) : "GAME OVER";
         gameOverQuote = pick(QUOTES);
         if (game.score() > highScore) {
@@ -903,10 +940,10 @@ public class EmojiSnakeApp extends Application {
 
     private void handleKey(KeyCode code) {
         if (interlude != null) {
-            if (code == KeyCode.ESCAPE) {
-                Platform.exit();
-            } else {
-                interlude.handleKey(code);
+            switch (code) {
+                case ESCAPE -> Platform.exit();
+                case M -> sound.toggle(); // mute works everywhere - and never advances an interlude
+                default -> interlude.handleKey(code);
             }
             return;
         }
@@ -930,7 +967,10 @@ public class EmojiSnakeApp extends Application {
             case G -> { if (debug && started && game.status() == GameState.Status.RUNNING) game.forceShed(); return; }
             case B -> {
                 if (debug && started && game.status() == GameState.Status.RUNNING) {
-                    interlude = new VisualNovelInterlude(pickNovel(), vnArt, metaUnlocked);
+                    com.emojisnake.vn.Story novel = pickNovel();
+                    if (novel != null) {
+                        interlude = new VisualNovelInterlude(novel, vnArt, metaUnlocked);
+                    }
                 }
                 return;
             }
@@ -1017,6 +1057,15 @@ public class EmojiSnakeApp extends Application {
             metaUnlocked = forceMeta || gamesPlayed > META_UNLOCK_GAMES;
             glitch.setMetaUnlocked(metaUnlocked);
             applyMetaGameFlags(); // configure the gags ONCE per run (not on every revive/resume)
+            // Back-room reward: floor progress resets each run, but the DEEPEST you've ever reached
+            // (meta.rank) seeds this run's portfolio - so re-descending isn't from scratch, you start
+            // richer. Progress-based (not wall-clock), so it can't be farmed by idling/pausing.
+            int startShares = Math.min(12, meta.rank());
+            if (metaUnlocked && startShares > 0) {
+                game.grantShares(startShares);
+                toast("carried down from floor " + meta.rank() + ": " + startShares + " shares (📈 "
+                        + String.format(Locale.ROOT, "%.1fx", game.stockMultiplier()) + ")", TOAST_LONG);
+            }
         }
     }
 
@@ -1036,6 +1085,7 @@ public class EmojiSnakeApp extends Application {
         game.setBasiliskEnabled(metaUnlocked);    // roasted chicken can hatch the cockatrice
         game.setGambleEnabled(metaUnlocked);      // a food can be a 🎰 slot machine
         game.setStocksEnabled(metaUnlocked);      // 📈 stocks compound score (the deep-floor rally)
+        game.setBoxEnabled(metaUnlocked);         // 📦 box food triggers the "walls closing in" shrink
         game.setTrimPerLevel(metaUnlocked ? meta.trim() : 0); // the persistent BARBER haircut
         // The gaslight is ONLY for the plain pre-wake games: it caps a too-long plain run (walls in
         // your face burn your lives) to push you to the wake-up. Once awake, the chaos does that job.
@@ -1069,7 +1119,6 @@ public class EmojiSnakeApp extends Application {
             mercyMsg = "";
             resumeIsRevive = false;
             vnSeenThisRun.clear();    // a fresh run may see any novel again
-            lastNovelId = null;
             startQuote = pick(QUOTES);
             interlude = null;
             lastLevel = 1;
@@ -1082,6 +1131,8 @@ public class EmojiSnakeApp extends Application {
             accumulatorNanos = 0;
             lastNanos = 0;
             hitstopFrames = 0;
+            fakeCrashUsedThisRun = false; // one fake crash per run
+            floorThisRun = 0;             // back-room floor progress does NOT carry across a death
         }
     }
 
@@ -1253,29 +1304,33 @@ public class EmojiSnakeApp extends Application {
         String scoreStr = "Score " + game.score();
         gc.fillText(glitch.garble(scoreStr), 52 + j, mid + j);
 
-        // Lives as red hearts, just after the score.
+        // Lives as red hearts just after the score; compact past 3 (♥×N) so a full row of 4-5 lives
+        // never widens into - and hides behind - the centered "Best" text.
         if (lives > 0) {
             gc.setFill(Color.web("#ff5a6a"));
             double heartsX = 52 + scoreStr.length() * 12.0 + 14;
-            gc.fillText("♥".repeat(lives), heartsX + j, mid + j);
+            String hearts = lives <= 3 ? "♥".repeat(lives) : "♥×" + lives;
+            gc.fillText(hearts, heartsX + j, mid + j);
         }
 
+        // Centre: just the best score (+ a ★ once beaten). Kept short so it can't collide with the left
+        // (score + lives) or right (progress + level) clusters.
         gc.setFill(ACCENT);
         gc.setTextAlign(TextAlignment.CENTER);
-        String best = "Best " + highScore
-                + (meta.rank() > 0 ? "   Floor " + meta.rank() + "/" + MAX_FLOORS : "")
-                + (meta.trim() > 0 ? "   ✂L" + meta.trim() : "")
-                + (meta.ended() ? " ★" : "");
+        String best = "Best " + highScore + (meta.ended() ? " ★" : "");
         gc.fillText(glitch.garble(best), WIDTH / 2.0 - j, mid - j);
 
+        // Right cluster: THIS run's floor progress + the persistent haircut + the level - compact labels.
         gc.setFill(Color.web("#cfd6cf"));
         gc.setTextAlign(TextAlignment.RIGHT);
         String flags = (sound.isEnabled() ? "" : "  (muted)") + (calm ? "  (calm)" : "");
-        String lvlStr = "Lvl " + game.level() + flags;
+        String prog = (floorThisRun > 0 ? "F" + floorThisRun + "/" + MAX_FLOORS + "  " : "")
+                + (meta.trim() > 0 ? "✂" + meta.trim() + "  " : "");
+        String lvlStr = prog + "Lvl " + game.level() + flags;
         gc.fillText(glitch.garble(lvlStr), WIDTH - 14 + j, mid + j);
 
-        // Live 📈 portfolio multiplier (only while holding shares), tucked to the LEFT of the level in
-        // the far-right cluster - so it never overlaps the centered "Best…" text, even at huge scores.
+        // Live 📈 portfolio multiplier (only while holding shares), tucked to the LEFT of the right
+        // cluster - so it never overlaps the centered "Best" text.
         if (game.shares() > 0) {
             gc.setFill(STOCK_GREEN);
             gc.fillText(String.format(Locale.ROOT, "▲%.1fx", game.stockMultiplier()),
@@ -1511,7 +1566,7 @@ public class EmojiSnakeApp extends Application {
 
     private void renderVnSnapshotAndExit() {
         // Fixed novel; advance enough to fully reveal the opening line so the choices show.
-        VisualNovelInterlude vn = new VisualNovelInterlude(VisualNovels.all().get(0), vnArt, true);
+        VisualNovelInterlude vn = new VisualNovelInterlude(VisualNovels.all().get(0), vnArt, true, null);
         for (int i = 0; i < 260; i++) {
             vn.update(1.0 / 60.0);
         }
@@ -1537,7 +1592,7 @@ public class EmojiSnakeApp extends Application {
     private void renderStoreSnapshotAndExit() {
         game = new GameState(COLS, ROWS, 42L);
         game.addScore(160); // give the shopper something to spend (shows several rows affordable)
-        StoreInterlude store = new StoreInterlude(game, atlas, WIDTH, HEIGHT, 2, MAX_FLOORS, 1, MAX_LIFE_BONUS, 3, 5, 1, MAX_TRIM);
+        StoreInterlude store = new StoreInterlude(game, atlas, WIDTH, HEIGHT, 2, MAX_FLOORS, 1, MAX_LIFE_BONUS, 3, 5, 1, MAX_TRIM, false);
         for (int i = 0; i < 30; i++) {
             store.update(1.0 / 60.0);
         }
@@ -1697,7 +1752,7 @@ public class EmojiSnakeApp extends Application {
         secretUsed = false;
         secretHinted = false;
         vnSeenThisRun.clear();
-        lastNovelId = null;
+        floorThisRun = 0;
         accumulatorNanos = 0;
         return game;
     }
@@ -1802,7 +1857,7 @@ public class EmojiSnakeApp extends Application {
         beginPlay(5L);
         interlude = new VisualNovelInterlude(
                 VisualNovels.all().stream().filter(s -> s.id().equals("billable")).findFirst().orElseThrow(),
-                vnArt, true);
+                vnArt, true, null); // null rng => authored order, so the fixed-digit routes stay valid
         playRenderAndSnap("opening");
         vnReveal();
         interlude.handleKey(KeyCode.DIGIT2); // bill ruthlessly -> rival junction
@@ -1824,7 +1879,7 @@ public class EmojiSnakeApp extends Application {
         beginPlay(5L);
         interlude = new VisualNovelInterlude(
                 VisualNovels.all().stream().filter(s -> s.id().equals("billable")).findFirst().orElseThrow(),
-                vnArt, true);
+                vnArt, true, null); // null rng => authored order, so the fixed-digit routes stay valid
         vnReveal();
         interlude.handleKey(KeyCode.DIGIT1); // refuse to bill a dying man -> super-kind -> LETHAL
         VisualNovelInterlude vn = (VisualNovelInterlude) interlude;
@@ -2017,7 +2072,8 @@ public class EmojiSnakeApp extends Application {
 
     private void playEndingBlockedUntilNovelsRead() {
         beginPlay(5L);
-        meta = new SaveStore.Save(MAX_FLOORS, 0, false); // all floors, but NO novels read yet
+        meta = new SaveStore.Save(MAX_FLOORS, 0, false); // NO novels read yet
+        floorThisRun = MAX_FLOORS; // all floors descended THIS run (the gate is now run-local)
         game.addScore(400);
         game.forceStore(ahead());
         step();
@@ -2035,6 +2091,7 @@ public class EmojiSnakeApp extends Application {
             allVn.add(s.id());
         }
         meta = new SaveStore.Save(MAX_FLOORS, 0, false, allVn);
+        floorThisRun = MAX_FLOORS; // all floors descended THIS run (the ending gate is run-local now)
         game.addScore(400);
         game.forceStore(ahead());
         step();
@@ -2050,7 +2107,9 @@ public class EmojiSnakeApp extends Application {
         if (interlude != null && interlude.isDone()) {
             finishInterlude();
         }
-        check(game.status() == GameState.Status.GAME_OVER, "the finale should end the run on a win screen");
+        check(meta.ended(), "the win must persist even though the run keeps going");
+        check(game.status() == GameState.Status.RUNNING && !started,
+                "after the finale you keep grinding - resumed to the crawl prompt, not a game over");
     }
 
     private void playStock() {

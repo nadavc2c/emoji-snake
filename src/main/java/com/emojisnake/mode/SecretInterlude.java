@@ -31,18 +31,18 @@ public final class SecretInterlude implements Interlude {
     };
 
     private static final String[] FLOOR_TITLE = {
-        "THE MAILROOM OF THE DAMNED",
-        "COMPLIANCE",
-        "THE LITIGATION PITS",
-        "THE PARTNERS' ROOST",
-        "THE BOTTOM",
+        "SUB-LEVEL 1 - THE MAILROOM",
+        "SUB-LEVEL 2 - COMPLIANCE",
+        "SUB-LEVEL 3 - THE LITIGATION PITS",
+        "SUB-LEVEL 4 - THE PARTNERS' DEN",
+        "SUB-LEVEL 5 - THE MANAGING PARTNER'S OFFICE",
     };
     private static final String[] FLOOR_FLAVOR = {
-        "every letter is a threat. you sort them, smiling.",
-        "they 'comply' you here. it's a verb now.",
-        "something down here still bills, and it has teeth.",
-        "they smell the ambition on you. they approve.",
-        "the chair at the bottom is empty. it has your name on it.",
+        "every envelope is a threat somebody paid to send. you file them, and you learn the names.",
+        "'compliance' is a verb down here. they comply people - quietly, on paper, permanently.",
+        "the motions you lost are still breathing in the dark. a deposition that bites back.",
+        "the partners smell the ambition coming off you through the floor. they approve. that's worse.",
+        "the managing partner's chair sits empty behind the widest desk in the firm. the brass plate is already engraved with your name.",
     };
 
     private final Beat[] beats;
@@ -59,8 +59,10 @@ public final class SecretInterlude implements Interlude {
     public SecretInterlude(int floor, int maxFloors) {
         int i = Math.max(1, Math.min(floor, FLOOR_TITLE.length)) - 1;
         Beat close = floor >= maxFloors
-                ? new Beat("YOU'VE HIT THE BOTTOM.", "the TRUE ENDING is unlocked. it waits in the store.")
-                : new Beat("one floor deeper.", "the firm notices. keep descending.");
+                ? new Beat("THE FIRM HAS NO DEEPER FLOOR.",
+                        "you've proven yourself in the dark. the only way left now is UP - to the chair with your name on it.")
+                : new Beat("one floor deeper.",
+                        "the firm feels you moving through its foundations. it does not object. keep descending.");
         this.beats = new Beat[] {
             new Beat("FLOOR " + floor + "/" + maxFloors + " - " + FLOOR_TITLE[i], FLOOR_FLAVOR[i]),
             close,
@@ -79,6 +81,9 @@ public final class SecretInterlude implements Interlude {
 
     @Override
     public void handleKey(KeyCode code) {
+        if (!Interlude.isAdvanceKey(code)) {
+            return; // mute / screenshot / etc. must not page past a line you're still reading
+        }
         beat++;
         if (beat >= beats.length) {
             dismissed = true;
@@ -112,7 +117,7 @@ public final class SecretInterlude implements Interlude {
         if (((int) (elapsed * 2)) % 2 == 0) {
             gc.setFont(Font.font("Consolas", FontWeight.BOLD, 16));
             gc.setFill(Color.web("#8a948a"));
-            gc.fillText(last ? "[ press any key to leave ]" : "[ press any key to progress ]",
+            gc.fillText(last ? "[ press a key to leave ]" : "[ press a key to continue ]",
                     w / 2, h - 48);
         }
     }

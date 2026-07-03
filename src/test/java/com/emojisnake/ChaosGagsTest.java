@@ -113,18 +113,42 @@ class ChaosGagsTest {
     }
 
     @Test
-    void detachedHeadDoesNotLeakTheSlotFlagOntoTheRespawn() {
-        // Regression: tickDetached must clear foodIsSlot on a respawn, or the next ordinary food
-        // inherits the gamble flag and mis-fires the slot interlude (and won't grow).
+    void detachedHeadPassesThroughSpecialFoodInsteadOfEatingIt() {
+        // While split, the mechanic pickups (slot/book/stock) PASS THROUGH untouched - so the lone head
+        // can't waste a book (which would lock the ending) or farm specials mid-shed. Only plain food is
+        // edible while detached. The special food stays on the board for after the snake reconnects.
         GameState g = new GameState(20, 20, 5L);
         g.setGambleEnabled(true);
-        g.forceShed();                              // head detached at (10,10)
+        g.forceShed();                              // head detached at (10,10) heading RIGHT
         g.forceSlotFood(new Point(11, 10));         // a 🎰 dead ahead
-        assertTrue(g.isSlotFood());
+        int lenBefore = g.length();
 
-        g.tick();                                   // lone head eats it; respawn must be a plain food
+        GameState.Event e = g.tick();               // head -> (11,10) but must NOT consume the slot
 
-        assertFalse(g.isSlotFood(), "the respawned food must not inherit the slot flag");
+        assertSame(GameState.Event.MOVED, e, "a special food is not eaten while detached");
+        assertTrue(g.isSlotFood(), "the slot food stays on the board for after reconnect");
+        assertEquals(new Point(11, 10), g.food(), "the slot food did not move or respawn");
+        assertEquals(lenBefore, g.length(), "passing through a special does not grow the lone head");
+        assertFalse(g.drainNotices().stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.SLOT),
+                "no SLOT notice fires while detached");
+    }
+
+    @Test
+    void eatingTheBoxGrowsLikeFoodAndFiresTheBoxNotice() {
+        // The 📦 "walls closing in" food eats/grows exactly like normal food, but fires a BOX notice the
+        // app turns into the window-shrink - so the shrink has a coherent on-board cause.
+        GameState g = new GameState(20, 20, 5L);
+        int lenBefore = g.length();
+        g.forceBoxFood(new Point(11, 10));          // 📦 dead ahead
+        assertTrue(g.isBoxFood());
+
+        GameState.Event e = g.tick();               // eat it
+
+        assertSame(GameState.Event.ATE_FOOD, e, "the 📦 is eaten as normal food");
+        assertEquals(lenBefore + 1, g.length(), "the 📦 grows you like any food");
+        assertFalse(g.isBoxFood(), "the respawn is not another box");
+        assertTrue(g.drainNotices().stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.BOX),
+                "eating the 📦 fires a BOX notice (the app runs the window-shrink)");
     }
 
     @Test

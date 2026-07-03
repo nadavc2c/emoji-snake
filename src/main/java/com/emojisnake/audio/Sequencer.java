@@ -25,9 +25,12 @@ public final class Sequencer {
     private static final double BPM_MAX = 232;
     private static final int TONIC = 45;             // A2-ish root for the bass
 
-    // Root movement per bar (semitones from tonic) and a minor triad to arpeggiate.
-    private static final int[] PROGRESSION = {0, 0, 5, 7};
-    private static final int[] TRIAD = {0, 3, 7, 12};
+    // A warmer, moving minor loop (i - VI - III - VII in a low register) - more musical than the old
+    // static {0,0,5,7} that made the groove feel simple/annoying.
+    private static final int[] PROGRESSION = {0, -4, 3, -2};
+    // A short, singable motif (scale degrees above the bar root) so the lead carries a melody instead
+    // of a bare triad arpeggio.
+    private static final int[] MELODY = {0, 3, 7, 3, 5, 7, 10, 7, 5, 3, 0, 3, 7, 12, 10, 7};
 
     // --- Classical scores: {midi, durationSteps} pairs; midi = -1 is a rest. ---------------------
     private static final int[][] DIES_IRAE = { // boss: doom
@@ -122,6 +125,7 @@ public final class Sequencer {
             case VN -> 68;
             case SECRET -> 58;
             case ENDING -> 104;
+            case CRASH -> 120; // the error drone just needs a steady clock to retrigger on
         };
         return (int) Math.round(sampleRate * 60.0 / (bpm * STEPS_PER_BEAT));
     }
@@ -129,12 +133,19 @@ public final class Sequencer {
     private void fireStep() {
         if (scene == MusicScene.NORMAL) {
             fireAdaptiveStep();
+        } else if (scene == MusicScene.CRASH) {
+            fireCrashStep();
         } else {
             fireScoreStep();
         }
     }
 
-    /** The original adaptive chiptune groove (unchanged). */
+    /**
+     * The adaptive chiptune groove - reworked warmer + more melodic. A rounded triangle bass on the
+     * moving minor progression, a soft octave pad, a singable triangle melody (the {@link #MELODY}
+     * motif) instead of a bare arpeggio, and - crucially - NO ear-splitting 3-8kHz noise hiss (the old
+     * source of the "annoying"). Corruption now colours it with a quiet low tritone drone, not screech.
+     */
     private void fireAdaptiveStep() {
         int posInBar = (int) (step % 16);
         long bar = step / 16;
@@ -142,42 +153,65 @@ public final class Sequencer {
 
         double stepSeconds = (double) samplesPerStep / sampleRate;
 
+        // Warm sustained bass + a quiet octave pad for body, on every beat.
         if (posInBar % STEPS_PER_BEAT == 0) {
-            mixer.triggerNote(Waveform.TRIANGLE, noteHz(root), 0.55, 0.5, 0.5,
-                    0.004, stepSeconds * 3.2, 0.0, 0.05);
+            mixer.triggerNote(Waveform.TRIANGLE, noteHz(root), 0.50, 0.5, 0.5,
+                    0.006, stepSeconds * 3.6, 0.0, 0.09);
+            mixer.triggerNote(Waveform.TRIANGLE, noteHz(root + 12), 0.15, 0.5, 0.5,
+                    0.02, stepSeconds * 3.6, 0.0, 0.14);
         }
 
+        // A rounder kick on the downbeats (triangle sweep, not a saw stab).
         if (posInBar == 0 || posInBar == 8) {
-            Voice kick = mixer.triggerNote(Waveform.SAW, 120, 0.6, 0.5, 0.5,
-                    0.002, 0.09, 0.0, 0.02);
-            kick.sweepTo(48, 0.08, sampleRate);
+            Voice kick = mixer.triggerNote(Waveform.TRIANGLE, 120, 0.55, 0.5, 0.5,
+                    0.002, 0.10, 0.0, 0.02);
+            kick.sweepTo(46, 0.09, sampleRate);
         }
 
-        if (intensity > 0.18) {
-            int gap = Math.max(1, (int) Math.round(4 * (1 - intensity)));
+        // Warm melodic lead: the motif over the chord, on a soft triangle; it phrases faster as the
+        // game speeds up. Corruption only lightly detunes it (unease), never turns it to noise.
+        if (intensity > 0.15) {
+            int gap = Math.max(2, (int) Math.round(4 * (1 - intensity)));
             if (step % gap == 0) {
-                int tone = TRIAD[(int) ((step / gap) % TRIAD.length)];
-                int leadMidi = root + 24 + tone;
-                double pulse = 0.5 - corruption * 0.28;
-                double pan = (step % 2 == 0) ? 0.35 : 0.65;
-                Voice lead = mixer.triggerNote(Waveform.SQUARE, noteHz(leadMidi),
-                        0.30, pan, pulse, 0.003, stepSeconds * 0.9, 0.0, 0.03);
-                lead.setDetune(1.0 + corruption * 0.03);
-
-                if (corruption > 0.6 && rng.nextDouble() < 0.5) {
-                    mixer.triggerNote(Waveform.SQUARE, noteHz(leadMidi + 6),
-                            0.18, 1 - pan, pulse, 0.003, stepSeconds * 0.7, 0.0, 0.03);
-                }
+                int deg = MELODY[(int) ((step / gap) % MELODY.length)];
+                int leadMidi = root + 12 + deg;
+                double warm = 0.55 - corruption * 0.12;
+                double pan = (step % 2 == 0) ? 0.42 : 0.58;
+                Voice lead = mixer.triggerNote(Waveform.TRIANGLE, noteHz(leadMidi),
+                        0.26, pan, warm, 0.006, stepSeconds * 1.6, 0.0, 0.07);
+                lead.setDetune(1.0 + corruption * 0.02);
             }
         }
 
-        if (posInBar == 4 || posInBar == 12) {
-            mixer.triggerNote(Waveform.NOISE, 3200, 0.32, 0.5, 0.5,
-                    0.001, 0.11, 0.0, 0.02);
+        // Corruption adds dread with a low, quiet tritone drone once per bar - not an 8kHz hiss.
+        if (corruption > 0.5 && posInBar == 0) {
+            mixer.triggerNote(Waveform.TRIANGLE, noteHz(root + 6), 0.12 * corruption, 0.5, 0.5,
+                    0.05, stepSeconds * 6, 0.0, 0.3);
         }
-        if (intensity > 0.55 && posInBar % 2 == 0) {
-            mixer.triggerNote(Waveform.NOISE, 8000, 0.16, 0.5, 0.5,
+
+        // A single soft, low-level closed hat for groove at higher intensity - gentle, not shrill.
+        if (intensity > 0.5 && posInBar % 4 == 2) {
+            mixer.triggerNote(Waveform.NOISE, 2200, 0.06, 0.5, 0.5,
                     0.001, 0.04, 0.0, 0.01);
+        }
+    }
+
+    /** The fake-crash "music": no melody at all - a harsh, glitchy system-error drone + static. */
+    private void fireCrashStep() {
+        double stepSeconds = (double) samplesPerStep / sampleRate;
+        // Constant static crackle.
+        mixer.triggerNote(Waveform.NOISE, 1500, 0.20, 0.5, 0.5,
+                0.001, stepSeconds * 0.8, 0.0, 0.01);
+        // A low, detuned "dying machine" buzz on the beat.
+        if (step % 4 == 0) {
+            Voice buzz = mixer.triggerNote(Waveform.SAW, 72, 0.34, 0.5, 0.5,
+                    0.002, stepSeconds * 3.6, 0.0, 0.05);
+            buzz.setDetune(1.03);
+        }
+        // An occasional harsh error "beep".
+        if (step % 8 == 3) {
+            mixer.triggerNote(Waveform.SQUARE, 210, 0.26, 0.5, 0.5,
+                    0.001, 0.12, 0.0, 0.02);
         }
     }
 
@@ -234,7 +268,7 @@ public final class Sequencer {
             case VN -> CANON;
             case SECRET -> WHOLE_TONE;
             case ENDING -> ODE_TO_JOY;
-            case NORMAL -> ODE_TO_JOY; // unused (NORMAL takes the adaptive path)
+            case NORMAL, CRASH -> ODE_TO_JOY; // unused (NORMAL + CRASH take their own paths)
         };
     }
 
@@ -245,7 +279,7 @@ public final class Sequencer {
             case VN -> 38;     // D2  (Canon in D)
             case SECRET -> 36; // C2  (whole-tone on C)
             case ENDING -> 48; // C3  (Ode to Joy, C major)
-            case NORMAL -> TONIC;
+            case NORMAL, CRASH -> TONIC; // unused (handled by their own step paths)
         };
     }
 

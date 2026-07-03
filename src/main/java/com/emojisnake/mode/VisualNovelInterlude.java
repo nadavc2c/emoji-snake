@@ -37,11 +37,14 @@ public final class VisualNovelInterlude implements Interlude {
     private final StoryState state;
     private final VnArt art;
     private final boolean meta;
+    private final java.util.Random choiceRng; // null => keep authored order (deterministic tests)
 
     private double elapsed;       // whole-interlude clock (animation)
     private double textT;         // seconds the current node's text has been revealing
-    private int selected;         // highlighted choice index
+    private int selected;         // highlighted choice index (into the DISPLAYED order)
     private boolean acknowledged; // an ending has been dismissed -> we're done
+    private String orderedFor;    // node id the current choice order belongs to
+    private int[] order = new int[0]; // display slot -> real choice index (shuffled per node)
 
     private String wrappedFor;    // node id the cached wrap belongs to
     private double wrappedWidth = -1; // wrap width the cache belongs to
@@ -49,10 +52,17 @@ public final class VisualNovelInterlude implements Interlude {
     private List<String> lines = List.of();
     private int totalChars;
 
+    /** Production: choices are shuffled per node so the winning answer is never always in slot 1. */
     public VisualNovelInterlude(Story story, VnArt art, boolean meta) {
+        this(story, art, meta, new java.util.Random());
+    }
+
+    /** {@code choiceRng == null} keeps choices in authored order - used by deterministic self-tests. */
+    public VisualNovelInterlude(Story story, VnArt art, boolean meta, java.util.Random choiceRng) {
         this.state = new StoryState(story);
         this.art = art;
         this.meta = meta;
+        this.choiceRng = choiceRng;
     }
 
     public Story story() {
@@ -89,13 +99,19 @@ public final class VisualNovelInterlude implements Interlude {
     @Override
     public void handleKey(KeyCode code) {
         ensureWrapped();
+        ensureOrder();
+        boolean advance = Interlude.isAdvanceKey(code) || isChoiceDigit(code);
         if (!textComplete()) {
-            textT = totalChars / CHARS_PER_SEC + 1; // first keypress: reveal the whole line
-            return;
+            if (advance) {
+                textT = totalChars / CHARS_PER_SEC + 1; // a play key reveals the whole line at once
+            }
+            return; // mute / screenshot / etc. do nothing
         }
         StoryNode cur = state.current();
         if (cur.isEnding()) {
-            acknowledged = true; // any key leaves the ending
+            if (advance) {
+                acknowledged = true; // only a play key leaves the ending
+            }
             return;
         }
         int n = cur.choices().size();
@@ -118,11 +134,46 @@ public final class VisualNovelInterlude implements Interlude {
         }
     }
 
+    private static boolean isChoiceDigit(KeyCode code) {
+        return code == KeyCode.DIGIT1 || code == KeyCode.DIGIT2
+                || code == KeyCode.DIGIT3 || code == KeyCode.DIGIT4;
+    }
+
     private void advance() {
-        state.choose(selected);
+        state.choose(order.length > selected ? order[selected] : selected); // map display slot -> real choice
         selected = 0;
         textT = 0;        // restart the typewriter for the new node
         wrappedFor = null; // force a re-wrap of the new node's text
+        // orderedFor no longer matches the new node -> ensureOrder() rebuilds a fresh shuffle for it.
+    }
+
+    /** Build (once per node) the display order of choices - a shuffle in production, identity in tests. */
+    private void ensureOrder() {
+        String id = state.current().id();
+        if (id.equals(orderedFor)) {
+            return;
+        }
+        orderedFor = id;
+        selected = 0;
+        int n = state.current().choices().size();
+        order = new int[n];
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
+        if (choiceRng != null) { // Fisher-Yates so the route-winning choice lands in a random slot
+            for (int i = n - 1; i > 0; i--) {
+                int j = choiceRng.nextInt(i + 1);
+                int t = order[i];
+                order[i] = order[j];
+                order[j] = t;
+            }
+        }
+    }
+
+    /** Test hook: the current node's display order (display slot -> real choice index). */
+    int[] choiceOrder() {
+        ensureOrder();
+        return order.clone();
     }
 
     // --- rendering -----------------------------------------------------------
@@ -131,6 +182,7 @@ public final class VisualNovelInterlude implements Interlude {
     public void render(GraphicsContext gc, double w, double h) {
         wrapWidth = w - 50; // dialogue box runs ~x=30..w-14; keep a margin so text never crops
         ensureWrapped();
+        ensureOrder();
         StoryNode cur = state.current();
         double hue = (elapsed * (meta ? 60 : 25)) % 360; // eye-bleed escalates once the meta is awake
 
@@ -341,7 +393,8 @@ public final class VisualNovelInterlude implements Interlude {
                 gc.strokeRoundRect(30, y, w - 60, boxH, 10, 10);
             }
             gc.setFill(sel ? Color.web("#aef5b0") : Color.web("#9fb39f"));
-            String label = (sel ? "▸ " : "  ") + (i + 1) + ". " + choices.get(i).label();
+            int real = (order.length == choices.size()) ? order[i] : i; // display slot -> real choice
+            String label = (sel ? "▸ " : "  ") + (i + 1) + ". " + choices.get(real).label();
             gc.setFont(TextFit.fit(label, "Segoe UI", FontWeight.BOLD, 18, labelMax)); // shrink to fit
             gc.fillText(label, 42, y + boxH / 2);
         }

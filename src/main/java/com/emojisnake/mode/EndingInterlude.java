@@ -19,10 +19,14 @@ public final class EndingInterlude implements Interlude {
     private record Beat(String big, String small) { }
 
     private static final Beat[] BEATS = {
-        new Beat("THE BASEMENT BOTTOMS OUT.", "there is nothing below you now. there is only you."),
-        new Beat("THE FIRM RECOGNISES ITS HEIR.", "the suit was always your size. you just had to descend to it."),
-        new Beat("YOU ARE THE SUPER PARTNER.", "CEO. apex. the thing every associate bills toward. ♡"),
-        new Beat("THE SNAKE EATS EVERYTHING.", "even the ending. press any key to rule."),
+        new Beat("THE FIRM HAS NO DEEPER FLOOR.",
+                "you crawled all the way to the bottom. so the private elevator only goes one way now: up."),
+        new Beat("THE FIRM RECOGNISES ITS HEIR.",
+                "it carries you past every floor you bled on - straight up to the corner office in the sky."),
+        new Beat("YOU ARE THE SUPER PARTNER.",
+                "CEO. apex predator. the chair at the top of the tower that every associate bills toward. ♡"),
+        new Beat("THE SNAKE ATE EVERYTHING.",
+                "the firm, the floors, the ending itself. press a key to keep grinding."),
     };
 
     private final VnArt art;
@@ -46,6 +50,9 @@ public final class EndingInterlude implements Interlude {
 
     @Override
     public void handleKey(KeyCode code) {
+        if (!Interlude.isAdvanceKey(code)) {
+            return; // only a play key pages the finale (not mute / screenshot / etc.)
+        }
         beat++;
         if (beat >= BEATS.length) {
             dismissed = true;
@@ -87,7 +94,7 @@ public final class EndingInterlude implements Interlude {
         if (((int) (elapsed * 2)) % 2 == 0) {
             gc.setFont(Font.font("Consolas", FontWeight.BOLD, 15));
             gc.setFill(Color.web("#9ad29a"));
-            gc.fillText(last ? "[ press any key to rule ]" : "[ press any key ]", w / 2, h - 34);
+            gc.fillText(last ? "[ press a key to keep grinding ]" : "[ press a key ]", w / 2, h - 34);
         }
     }
 

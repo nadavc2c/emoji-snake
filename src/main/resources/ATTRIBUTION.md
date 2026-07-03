@@ -28,6 +28,7 @@ point. Roles in the game:
 | `1F3EA.png` | 🏪    | On-board store (buy power-ups) |
 | `1F3B0.png` | 🎰    | Gamble food (random length added) |
 | `1F4C8.png` | 📈    | Stock (eating it compounds your score) |
+| `1F4E6.png` | 📦    | Box food ("walls closing in" - eating it shrinks the window) |
 | `1FAB1.png` | 🪱    | Living food (flees)           |
 | `1F42D.png` | 🐭    | Living food (flees)           |
 | `1F424.png` | 🐤    | Living food (flees)           |

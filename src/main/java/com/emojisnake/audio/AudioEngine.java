@@ -28,6 +28,14 @@ public final class AudioEngine {
     private static final float SAMPLE_RATE = 44_100f;
     private static final int BLOCK_FRAMES = 1024; // ~23 ms per block
 
+    // Master limiter: normalizes perceived loudness so scenes and SFX bursts don't jump between "too
+    // loud" and "regular". Downward-only (it never boosts quiet passages) - fast to pull a hot block
+    // down, slow to recover, so it rides the level smoothly instead of pumping.
+    private static final double LIMIT_TARGET = 0.85;
+    private static final double LIMIT_ATTACK = 0.35;
+    private static final double LIMIT_RELEASE = 0.03;
+    private double limiterGain = 1.0;
+
     private final Mixer mixer = new Mixer();
     private final Sequencer sequencer;
 
@@ -140,6 +148,21 @@ public final class AudioEngine {
                 sequencer.setIntensity(snap);
                 sequencer.renderInto(fbuf, frames);
                 mixer.applyMaster(fbuf, 0, frames, snap.corruption());
+            }
+
+            // Normalize loudness: pull the whole block down when it peaks hot, recover slowly. When
+            // muted the buffer is silent, so the gain just drifts back toward unity.
+            float peak = 0f;
+            for (float v : fbuf) {
+                float a = Math.abs(v);
+                if (a > peak) {
+                    peak = a;
+                }
+            }
+            double desired = peak > LIMIT_TARGET ? LIMIT_TARGET / peak : 1.0;
+            limiterGain += (desired - limiterGain) * (desired < limiterGain ? LIMIT_ATTACK : LIMIT_RELEASE);
+            for (int i = 0; i < fbuf.length; i++) {
+                fbuf[i] *= (float) limiterGain;
             }
 
             for (int i = 0; i < fbuf.length; i++) {

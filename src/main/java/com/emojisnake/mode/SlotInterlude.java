@@ -70,6 +70,9 @@ public final class SlotInterlude implements Interlude {
         if (elapsed <= REVEAL) {
             return; // can't skip the spin; reels must finish and the win must show
         }
+        if (!Interlude.isAdvanceKey(code)) {
+            return; // mute / screenshot / etc. must not dismiss the win before you've read it
+        }
         dismissed = true;
         exitDir = switch (code) {
             case UP, W -> Direction.UP;
@@ -121,7 +124,7 @@ public final class SlotInterlude implements Interlude {
             gc.fillText((jackpot ? "JACKPOT!  +" : "+") + amount + " LENGTH", w / 2, y + size + 92);
             gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 16));
             gc.setFill(Color.web("#9fb39f"));
-            gc.fillText("press any key", w / 2, y + size + 126);
+            gc.fillText("press a key to collect", w / 2, y + size + 126);
         } else {
             gc.setFont(Font.font("Consolas", FontWeight.BOLD, 22));
             gc.setFill(Color.web("#ff9ec7"));

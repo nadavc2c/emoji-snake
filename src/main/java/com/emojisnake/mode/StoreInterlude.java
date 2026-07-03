@@ -68,6 +68,7 @@ public final class StoreInterlude implements Interlude {
     private final int maxTrim;
     private final int vnDone;        // novels finished (persistent)
     private final int vnTotal;
+    private final boolean alreadyEnded; // the TRUE ENDING has already been beaten (persistent)
 
     private Direction exitDir;
     private boolean boughtSecret;    // bought a descent -> app advances a floor + shows the chapter
@@ -80,7 +81,7 @@ public final class StoreInterlude implements Interlude {
 
     public StoreInterlude(GameState game, EmojiAtlas atlas, double width, double height,
                           int rank, int maxFloors, int lifeBonus, int maxLifeBonus,
-                          int vnDone, int vnTotal, int trim, int maxTrim) {
+                          int vnDone, int vnTotal, int trim, int maxTrim, boolean alreadyEnded) {
         this.game = game;
         this.atlas = atlas;
         this.rank = rank;
@@ -91,6 +92,7 @@ public final class StoreInterlude implements Interlude {
         this.maxTrim = maxTrim;
         this.vnDone = vnDone;
         this.vnTotal = vnTotal;
+        this.alreadyEnded = alreadyEnded;
     }
 
     private static int priceFor(StatusKind s) {
@@ -253,6 +255,10 @@ public final class StoreInterlude implements Interlude {
     }
 
     private void buyEnding() {
+        if (alreadyEnded) {
+            flash("you already run the firm. there's nothing left up here to buy.");
+            return; // no re-charging you for a coronation you've already had
+        }
         if (!endingUnlocked()) {
             flash(!floorsCleared()
                     ? "the TRUE ENDING is for closers. clear all " + maxFloors + " floors first."
@@ -317,12 +323,13 @@ public final class StoreInterlude implements Interlude {
                 descendAvailable() ? floorPrice() + " pts" : "-", Tile.DOOR, canDescend, "#101a26");
         // 9: the ending (red herring until the bottom)
         y += rowH;
-        boolean canEnd = endingUnlocked() && game.score() >= ENDING_PRICE;
-        String endLabel = endingUnlocked() ? "★ BECOME THE FIRM ★  (TRUE ENDING)"
+        boolean canEnd = !alreadyEnded && endingUnlocked() && game.score() >= ENDING_PRICE;
+        String endLabel = alreadyEnded ? "★ THE FIRM IS YOURS ★  (already ascended)"
+                : endingUnlocked() ? "★ BECOME THE FIRM ★  (TRUE ENDING)"
                 : !floorsCleared() ? "★ TRUE ENDING ★  (clear all floors first)"
                 : "★ TRUE ENDING ★  (read all novels: " + vnDone + "/" + vnTotal + ")";
         row(gc, w, y, rowH, 9, endLabel,
-                endingUnlocked() ? ENDING_PRICE + " pts" : "???", Tile.BOSS, canEnd, "#1c1024");
+                alreadyEnded ? "-" : endingUnlocked() ? ENDING_PRICE + " pts" : "???", Tile.BOSS, canEnd, "#1c1024");
 
         if (flashT > 0) {
             gc.setTextAlign(TextAlignment.CENTER);
