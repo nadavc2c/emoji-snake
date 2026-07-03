@@ -70,4 +70,42 @@ class SaveStoreTest {
         assertTrue(back.ended());
         assertEquals(0, back.gamesPlayed(), "only the malformed field falls back to its default");
     }
+
+    // --- tamper evidence + crash safety ---------------------------------------------------------
+
+    @Test
+    void aHandWrittenPlaintextSaveIsIgnoredNotParsed(@TempDir Path dir) throws Exception {
+        // Tamper evidence: no real version ever wrote save.dat as plain text, so a failed digest
+        // means editing - the file must be ignored wholesale, not accepted via a plaintext parse.
+        Path file = dir.resolve("save.dat");
+        Files.writeString(file, "high=999999\nrank=5\nended=true\n");
+        SaveStore.Save back = new SaveStore(file).load();
+        assertEquals(0, back.highScore(), "an edited save must not smuggle in a high score");
+        assertEquals(0, back.rank());
+        assertFalse(back.ended());
+    }
+
+    @Test
+    void aTruncatedSaveFallsBackToACleanSlate(@TempDir Path dir) throws Exception {
+        // Crash safety: a half-written file (power loss mid-save) fails the digest and resets
+        // cleanly instead of parsing garbage.
+        Path file = dir.resolve("save.dat");
+        SaveStore store = new SaveStore(file);
+        store.save(new SaveStore.Save(3, 2, true, 420, 7, 3));
+        String whole = Files.readString(file);
+        Files.writeString(file, whole.substring(0, whole.length() / 2));
+        SaveStore.Save back = store.load();
+        assertEquals(0, back.highScore(), "a truncated save resets rather than mis-parsing");
+        assertEquals(0, back.rank());
+    }
+
+    @Test
+    void savingLeavesNoTempFileBehind(@TempDir Path dir) throws Exception {
+        // The atomic write-then-move must clean up after itself and still round-trip.
+        Path file = dir.resolve("save.dat");
+        SaveStore store = new SaveStore(file);
+        store.save(new SaveStore.Save(1, 0, false, 42, 2, 1));
+        assertFalse(Files.exists(dir.resolve("save.dat.tmp")), "the staging file must be moved away");
+        assertEquals(42, store.load().highScore(), "the moved file round-trips");
+    }
 }

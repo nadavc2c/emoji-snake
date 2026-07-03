@@ -13,18 +13,18 @@ group = "com.emojisnake"
 // app-version, the GitHub release, and the Drive filenames all share ONE number. MAJOR.MINOR come from
 // the latest `vX.Y` tag; PATCH = commits since it - so it advances on every push (v1.3 -> 1.3.0, then
 // 1.3.1, 1.3.2, ...). Falls back to 0.0.0 if git/tags are unavailable (jpackage needs numeric X.Y.Z).
-fun gitVersion(): String {
-    return try {
-        val raw = ProcessBuilder("git", "describe", "--tags", "--match", "v[0-9]*", "--always")
-            .redirectErrorStream(true).start()
-            .inputStream.bufferedReader().readText().trim().removePrefix("v")
-        val m = Regex("""^(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?$""").find(raw)
-        if (m != null) "${m.groupValues[1]}.${m.groupValues[2]}.${m.groupValues[3].ifEmpty { "0" }}" else "0.0.0"
-    } catch (e: Exception) {
-        "0.0.0"
-    }
-}
-version = gitVersion()
+// providers.exec (not a raw ProcessBuilder) keeps this configuration-cache-safe: Gradle tracks the
+// git call as a build-configuration input instead of flagging an external process at config time.
+val gitDescribe: Provider<String> = providers.exec {
+    commandLine("git", "describe", "--tags", "--match", "v[0-9]*", "--always")
+    workingDir = projectDir // pin to the repo root - the daemon's cwd is not guaranteed to be it
+    isIgnoreExitValue = true // not-a-repo exits non-zero; empty stdout falls through to 0.0.0 below
+}.standardOutput.asText
+version = runCatching {
+    val raw = gitDescribe.get().trim().removePrefix("v")
+    val m = Regex("""^(\d+)\.(\d+)(?:-(\d+)-g[0-9a-f]+)?$""").find(raw)
+    if (m != null) "${m.groupValues[1]}.${m.groupValues[2]}.${m.groupValues[3].ifEmpty { "0" }}" else "0.0.0"
+}.getOrDefault("0.0.0") // also covers a missing git binary (the exec provider throws at .get())
 
 repositories {
     mavenCentral()
@@ -65,7 +65,7 @@ tasks.test {
 // `Launcher` so JavaFX-on-classpath doesn't trip the "runtime components missing" guard.
 //
 // The exe icon is the committed art/snake.ico (a 256x256 PNG-embedded ICO derived from art/snake.png;
-// regenerate with package.ps1's -Icon helper if the art changes). Kept out of Gradle so the build
+// regenerate with package.ps1's -RegenIcon switch if the art changes). Kept out of Gradle so the build
 // script needn't touch java.awt (not on the Kotlin-DSL script classpath).
 tasks.register<Exec>("jpackageImage") {
     group = "distribution"

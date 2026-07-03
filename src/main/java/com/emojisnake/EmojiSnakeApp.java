@@ -126,6 +126,7 @@ public class EmojiSnakeApp extends Application {
     private boolean newBest;
     private boolean debug;
     private boolean smoke;
+    private boolean selfCheck;         // --snapshot/--play: exits through stop() but must never touch the real save
     private boolean forceMeta;         // --awake: force the deranged roguelite layer on from the start
     private int frameCount;
 
@@ -151,6 +152,7 @@ public class EmojiSnakeApp extends Application {
     private Stage stage;              // kept for the window-shrink gag
     private boolean shrinking;        // a window-shrink animation is in progress
     private double inputLockoutT;     // brief deafness after a stop, so mashed keys don't carry over
+    private double escQuitT;          // >0: ESC pressed once; a second press inside the window quits
     private double memeFlashTimer;    // the big "6 7" meme overlay
     private int downStreak;           // consecutive ↓ presses (the Frog-Fractions secret)
     private boolean secretUsed;       // the secret has fired this run
@@ -163,6 +165,7 @@ public class EmojiSnakeApp extends Application {
     private double huePhase;
 
     private static final int TRAIL_LENGTH = 16;
+    private static final double ESC_QUIT_WINDOW = 2.0; // seconds the armed "press again to quit" stays open
 
     @Override
     public void start(Stage stage) throws Exception {
@@ -180,12 +183,14 @@ public class EmojiSnakeApp extends Application {
         highScore = meta.highScore();   // mirror into the live field used by the HUD / snapshots
 
         if (snapshotArg != null) {
+            selfCheck = true;
             renderSnapshotAndExit(snapshotArg);
             return;
         }
 
         String playArg = raw.stream().filter(s -> s.startsWith("--play")).findFirst().orElse(null);
         if (playArg != null) {
+            selfCheck = true;
             runPlaytests(playArg); // headless scripted self-play: drive the real gags, assert, snapshot
             return;
         }
@@ -232,6 +237,15 @@ public class EmojiSnakeApp extends Application {
 
     @Override
     public void stop() {
+        // Fold the interrupted run's score into the record before the JVM goes - quitting mid-run
+        // (ESC-ESC / the window X) must not eat a personal best. Self-check runs (--snapshot/--play)
+        // and --smoke exit through here too and must never touch the real save.
+        if (!selfCheck && !smoke && game != null) {
+            if (game.score() > highScore) {
+                highScore = game.score();
+            }
+            persist();
+        }
         sound.close(); // release the audio thread + line cleanly
     }
 
@@ -249,6 +263,7 @@ public class EmojiSnakeApp extends Application {
                 if (toastTimer > 0) toastTimer -= dt;
                 if (inputLockoutT > 0) inputLockoutT -= dt;
                 if (memeFlashTimer > 0) memeFlashTimer -= dt;
+                if (escQuitT > 0) escQuitT -= dt;
 
                 if (smoke && frameCount >= 150) {
                     System.out.println("smoke: ran " + frameCount + " frames OK");
@@ -281,7 +296,9 @@ public class EmojiSnakeApp extends Application {
                     }
                 }
 
-                advanceSimulation(delta);
+                // Cap the catch-up so a sleep/hibernate/debugger stall can't fast-forward the snake
+                // through thousands of steps (and to its death) in a single frame.
+                advanceSimulation(Math.min(delta, 250_000_000.0));
                 checkLevelUp();
 
                 intensity.update(game, dt);
@@ -352,120 +369,145 @@ public class EmojiSnakeApp extends Application {
     }
 
     private void finishInterlude() {
-        if (interlude instanceof DodgeBossInterlude boss) {
-            int hits = boss.hits();
-            lives = Math.max(0, lives - hits); // every hit costs a life - always
-            if (lives <= 0) {
-                game.forceGameOver();
-                realGameOver();
-            } else if (hits == 0) {
-                // Flawless dodge: a clear, earned reward.
-                game.addScore(25);
-                game.applyStatus(StatusKind.GHOST, 60);
-                resumeAfterScreen("boss dodged flawlessly! +25 & a ghost.", false);
-            } else {
-                // It bit you: SAY what it cost (the resume prompt shows your remaining lives below). Then
-                // the "random lives" gag you like - it SOMETIMES coughs a life back, announced clearly so
-                // the logic reads as a wink, not a mystery.
-                boolean mercy = lives < maxLives() && rng.nextDouble() < BOSS_MERCY_CHANCE;
-                if (mercy) {
-                    lives = Math.min(maxLives(), lives + 1);
-                    resumeAfterScreen("bitten " + hits + "x... but it spat a life back (+1).", true);
-                } else {
-                    resumeAfterScreen("the boss bit you " + hits + "x. -" + hits
-                            + (hits == 1 ? " life." : " lives."), true);
-                }
-            }
-        } else if (interlude instanceof VisualNovelInterlude vn) {
-            // Novels are a PER-RUN collectible (like the floors): pickNovel already counted this one in
-            // vnSeenThisRun - any ending counts, even a BAD END (a run never re-offers a novel, so a wrong
-            // choice must not lock the ending). At 5/5 the books retire for the REST OF THIS RUN only.
-            refreshBooksEnabled();
-            String vnProg = "  [novels " + vnSeenThisRun.size() + "/" + VisualNovels.all().size() + "]";
-            // A wrong choice in the novel kills you - spend a life via the same path as the boss
-            // (revive() only works from GAME_OVER, so we adjust lives directly here).
-            if (vn.died()) {
-                lives = Math.max(0, lives - 1);
-                if (lives <= 0) {
-                    game.forceGameOver();
-                    realGameOver();
-                    gameOverTitle = "BAD END";   // a VN death is unmistakable, not a pause
-                } else {
-                    resumeAfterScreen("BAD END - " + lives + (lives == 1 ? " life left" : " lives left")
-                            + vnProg, true);
-                }
-            } else {
-                int reward = vn.reward();
-                if (reward > 0) {
-                    game.addScore(reward);
-                }
-                resumeAfterScreen(vn.outcomeBlurb() + (reward > 0 ? "  +" + reward : "") + vnProg, false);
-            }
-        } else if (interlude instanceof StoreInterlude store) {
-            // Apply any permanent +max-life upgrades bought this visit (persisted across runs).
-            if (store.livesBought() > 0) {
-                meta = meta.withMaxLifeBonus(Math.min(MAX_LIFE_BONUS, meta.maxLifeBonus() + store.livesBought()));
-                persist();
-                lives = Math.min(maxLives(), lives + store.livesBought());
-            }
-            // Apply any BARBER "haircut" levels bought this visit (persistent; takes effect immediately).
-            if (store.trimBought() > 0) {
-                meta = meta.withTrim(Math.min(MAX_TRIM, meta.trim() + store.trimBought()));
-                persist();
-                game.setTrimPerLevel(meta.trim());
-            }
-            if (store.boughtEnding()) {
-                meta = meta.withEnded(true); // cleared every floor + bought the way out
-                persist();
-                interlude = new EndingInterlude(vnArt); // the "become the firm" finale
-                return;
-            }
-            if (store.boughtSecret()) {
-                floorThisRun = Math.min(MAX_FLOORS, floorThisRun + 1); // descend one floor THIS run
-                // meta.rank is the DEEPEST floor ever reached - a persistent reward (starting shares),
-                // NOT the ending gate. The gate is floorThisRun, which resets on death (re-descend).
-                meta = meta.withRank(Math.max(meta.rank(), floorThisRun));
-                persist();
-                Direction safe = safeStoreExit(); // pre-set a safe heading so the post-chapter prompt
-                if (safe != null) {               // can't resume back into the wedged-against shop
-                    game.setInitialDirection(safe);
-                }
-                interlude = new SecretInterlude(floorThisRun, MAX_FLOORS); // the floor's chapter
-                return;
-            }
-            // The head is wedged against the solid 🏪, so pre-set a SAFE default heading (never into the
-            // shop or the body) for a non-direction resume; the player can still pick any direction at
-            // the crawl prompt. setInitialDirection sets it immediately (survives stopGrace's queue clear).
-            Direction exit = store.exitDirection();
-            if (exit == null || exit == game.direction() || exit == game.direction().opposite()) {
-                exit = safeStoreExit();
-            }
-            if (exit != null) {
-                game.setInitialDirection(exit);
-            }
-            resumeAfterScreen("thanks for shopping.", false);
-        } else if (interlude instanceof EndingInterlude) {
-            // You won - but the firm never closes. Keep the run alive so you can keep grinding; the win
-            // is already saved (meta.ended). The head is wedged against the shop, so pick a safe heading.
-            Direction safe = safeStoreExit();
-            if (safe != null) {
-                game.setInitialDirection(safe);
-            }
-            resumeAfterScreen("★ you are the firm ★  now keep grinding.", false);
-        } else if (interlude instanceof SlotInterlude slot) {
-            game.addPendingGrowth(slot.amount());
-            if (slot.exitDirection() != null) {
-                game.setInitialDirection(slot.exitDirection());
-            }
-            resumeAfterScreen((slot.amount() >= 5 ? "JACKPOT! +" : "+") + slot.amount() + " length", false);
-        } else if (interlude instanceof SecretInterlude) {
+        Interlude done = interlude;
+        if (done instanceof DodgeBossInterlude boss) {
+            finishBoss(boss);
+        } else if (done instanceof VisualNovelInterlude vn) {
+            finishNovel(vn);
+        } else if (done instanceof StoreInterlude store) {
+            finishStore(store);
+        } else if (done instanceof EndingInterlude) {
+            finishEnding();
+        } else if (done instanceof SlotInterlude slot) {
+            finishSlot(slot);
+        } else if (done instanceof SecretInterlude) {
             resumeAfterScreen("back to the surface. nothing changed.", false);
         } else {
             // Fake crash (or any other screen): also hand back to the crawl prompt, never auto-resume.
             resumeAfterScreen("...huh. false alarm.", false);
         }
-        interlude = null;
-        stopGrace(); // swallow keys mashed while the screen was up
+        // A finisher may chain one screen straight into another (store -> secret chapter / finale);
+        // only tear down when nothing new took over - the loop re-checks `interlude` after this call.
+        if (interlude == done) {
+            interlude = null;
+            stopGrace(); // swallow keys mashed while the screen was up
+        }
+    }
+
+    private void finishBoss(DodgeBossInterlude boss) {
+        int hits = boss.hits();
+        lives = Math.max(0, lives - hits); // every hit costs a life - always
+        if (lives <= 0) {
+            game.forceGameOver();
+            realGameOver();
+        } else if (hits == 0) {
+            // Flawless dodge: a clear, earned reward.
+            game.addScore(25);
+            game.applyStatus(StatusKind.GHOST, 60);
+            resumeAfterScreen("boss dodged flawlessly! +25 & a ghost.", false);
+        } else {
+            // It bit you: SAY what it cost (the resume prompt shows your remaining lives below). Then
+            // the "random lives" gag you like - it SOMETIMES coughs a life back, announced clearly so
+            // the logic reads as a wink, not a mystery.
+            boolean mercy = lives < maxLives() && rng.nextDouble() < BOSS_MERCY_CHANCE;
+            if (mercy) {
+                lives = Math.min(maxLives(), lives + 1);
+                resumeAfterScreen("bitten " + hits + "x... but it spat a life back (+1).", true);
+            } else {
+                resumeAfterScreen("the boss bit you " + hits + "x. -" + hits
+                        + (hits == 1 ? " life." : " lives."), true);
+            }
+        }
+    }
+
+    private void finishNovel(VisualNovelInterlude vn) {
+        // Novels are a PER-RUN collectible (like the floors): pickNovel already counted this one in
+        // vnSeenThisRun - any ending counts, even a BAD END (a run never re-offers a novel, so a wrong
+        // choice must not lock the ending). At 5/5 the books retire for the REST OF THIS RUN only.
+        refreshBooksEnabled();
+        String vnProg = "  [novels " + vnSeenThisRun.size() + "/" + VisualNovels.all().size() + "]";
+        // A wrong choice in the novel kills you - spend a life via the same path as the boss
+        // (revive() only works from GAME_OVER, so we adjust lives directly here).
+        if (vn.died()) {
+            lives = Math.max(0, lives - 1);
+            if (lives <= 0) {
+                game.forceGameOver();
+                realGameOver();
+                gameOverTitle = "BAD END";   // a VN death is unmistakable, not a pause
+            } else {
+                resumeAfterScreen("BAD END - " + lives + (lives == 1 ? " life left" : " lives left")
+                        + vnProg, true);
+            }
+        } else {
+            int reward = vn.reward();
+            if (reward > 0) {
+                game.addScore(reward);
+            }
+            resumeAfterScreen(vn.outcomeBlurb() + (reward > 0 ? "  +" + reward : "") + vnProg, false);
+        }
+    }
+
+    private void finishStore(StoreInterlude store) {
+        // Apply any permanent +max-life upgrades bought this visit (persisted across runs).
+        if (store.livesBought() > 0) {
+            meta = meta.withMaxLifeBonus(Math.min(MAX_LIFE_BONUS, meta.maxLifeBonus() + store.livesBought()));
+            persist();
+            lives = Math.min(maxLives(), lives + store.livesBought());
+        }
+        // Apply any BARBER "haircut" levels bought this visit (persistent; takes effect immediately).
+        if (store.trimBought() > 0) {
+            meta = meta.withTrim(Math.min(MAX_TRIM, meta.trim() + store.trimBought()));
+            persist();
+            game.setTrimPerLevel(meta.trim());
+        }
+        if (store.boughtEnding()) {
+            meta = meta.withEnded(true); // cleared every floor + bought the way out
+            persist();
+            interlude = new EndingInterlude(vnArt); // chain into the "become the firm" finale
+            return;
+        }
+        if (store.boughtSecret()) {
+            floorThisRun = Math.min(MAX_FLOORS, floorThisRun + 1); // descend one floor THIS run
+            // meta.rank is the DEEPEST floor ever reached - a persistent reward (starting shares),
+            // NOT the ending gate. The gate is floorThisRun, which resets on death (re-descend).
+            meta = meta.withRank(Math.max(meta.rank(), floorThisRun));
+            persist();
+            Direction safe = safeStoreExit(); // pre-set a safe heading so the post-chapter prompt
+            if (safe != null) {               // can't resume back into the wedged-against shop
+                game.setInitialDirection(safe);
+            }
+            interlude = new SecretInterlude(floorThisRun, MAX_FLOORS); // chain into the floor's chapter
+            return;
+        }
+        // The head is wedged against the solid 🏪, so pre-set a SAFE default heading (never into the
+        // shop or the body) for a non-direction resume; the player can still pick any direction at
+        // the crawl prompt. setInitialDirection sets it immediately (survives stopGrace's queue clear).
+        Direction exit = store.exitDirection();
+        if (exit == null || exit == game.direction() || exit == game.direction().opposite()) {
+            exit = safeStoreExit();
+        }
+        if (exit != null) {
+            game.setInitialDirection(exit);
+        }
+        resumeAfterScreen("thanks for shopping.", false);
+    }
+
+    private void finishEnding() {
+        // You won - but the firm never closes. Keep the run alive so you can keep grinding; the win
+        // is already saved (meta.ended). The head is wedged against the shop, so pick a safe heading.
+        Direction safe = safeStoreExit();
+        if (safe != null) {
+            game.setInitialDirection(safe);
+        }
+        resumeAfterScreen("★ you are the firm ★  now keep grinding.", false);
+    }
+
+    private void finishSlot(SlotInterlude slot) {
+        game.addPendingGrowth(slot.amount());
+        if (slot.exitDirection() != null) {
+            game.setInitialDirection(slot.exitDirection());
+        }
+        resumeAfterScreen((slot.amount() >= 5 ? "JACKPOT! +" : "+") + slot.amount() + " length", false);
     }
 
     /**
@@ -570,11 +612,8 @@ public class EmojiSnakeApp extends Application {
     }
 
     private void renderInterlude() {
-        layers.clear(layers.bg());
-        layers.clear(layers.trail());
-        layers.clear(layers.entity());
+        layers.clearAll();
         GraphicsContext gc = layers.overlay();
-        layers.clear(gc);
         interlude.render(gc, WIDTH, HEIGHT);
         particles.render(gc);
     }
@@ -703,22 +742,22 @@ public class EmojiSnakeApp extends Application {
         switch (n.kind()) {
             case POWERUP -> {
                 sound.bonus();
-                particles.burst(c[0], c[1], 26, elementColor(n.element()), 220);
-                camera.addTrauma(0.22);
-                camera.kick(0.04);
+                particles.burst(c[0], c[1], (int) (26 * juice()), elementColor(n.element()), 220);
+                camera.addTrauma(0.22 * juice());
+                camera.kick(0.04 * juice());
                 toast(statusName(n.element().status) + "!");
             }
             case SYNERGY -> {
                 sound.bonus();
-                particles.burst(c[0], c[1], 60, elementColor(n.element()), 320);
-                camera.addTrauma(0.5);
-                camera.kick(0.08);
+                particles.burst(c[0], c[1], (int) (60 * juice()), elementColor(n.element()), 320);
+                camera.addTrauma(0.5 * juice());
+                camera.kick(0.08 * juice());
                 toast(n.element().name() + " SYNERGY");
             }
             case PORTAL -> {
                 sound.turn();
-                particles.burst(c[0], c[1], 30, Color.web("#b07dff"), 260);
-                camera.kick(0.05);
+                particles.burst(c[0], c[1], (int) (30 * juice()), Color.web("#b07dff"), 260);
+                camera.kick(0.05 * juice());
             }
             case SHED -> {
                 // The body just fell apart. Make it feel like a wrong, jolting event.
@@ -941,8 +980,9 @@ public class EmojiSnakeApp extends Application {
     private void handleKey(KeyCode code) {
         if (interlude != null) {
             switch (code) {
-                case ESCAPE -> Platform.exit();
                 case M -> sound.toggle(); // mute works everywhere - and never advances an interlude
+                // ESC included: the store maps it to "leave the shop"; the others simply ignore it
+                // (the fake crash's handler is deliberately inert, so it stays unskippable).
                 default -> interlude.handleKey(code);
             }
             return;
@@ -960,7 +1000,16 @@ public class EmojiSnakeApp extends Application {
         switch (code) {
             case M -> { sound.toggle(); return; }
             case C -> { calm = !calm; toast(calm ? "calm mode" : "eye-bleed mode"); return; }
-            case ESCAPE -> { Platform.exit(); return; }
+            case ESCAPE -> {
+                // Double-press quit: one stray ESC must not eat a run (it used to hard-exit).
+                if (escQuitT > 0) {
+                    Platform.exit();
+                } else {
+                    escQuitT = ESC_QUIT_WINDOW;
+                    toast("leaving? press it again. the door only pretends to be locked.", ESC_QUIT_WINDOW);
+                }
+                return;
+            }
             case OPEN_BRACKET -> { if (debug) intensity.nudgeCorruption(-0.1); return; }
             case CLOSE_BRACKET -> { if (debug) intensity.nudgeCorruption(0.1); return; }
             case U -> { if (debug) { metaUnlocked = !metaUnlocked; glitch.setMetaUnlocked(metaUnlocked); applyMetaGameFlags(); } return; }
@@ -1060,10 +1109,9 @@ public class EmojiSnakeApp extends Application {
             // Back-room reward: floor progress resets each run, but the DEEPEST you've ever reached
             // (meta.rank) seeds this run's portfolio - so re-descending isn't from scratch, you start
             // richer. Progress-based (not wall-clock), so it can't be farmed by idling/pausing.
-            int startShares = Math.min(12, meta.rank());
-            if (metaUnlocked && startShares > 0) {
-                game.grantShares(startShares);
-                toast("carried down from floor " + meta.rank() + ": " + startShares + " shares (📈 "
+            if (metaUnlocked && meta.rank() > 0) {
+                game.grantShares(meta.rank()); // clamps to the portfolio cap internally
+                toast("carried down from floor " + meta.rank() + ": " + game.shares() + " shares (📈 "
                         + String.format(Locale.ROOT, "%.1fx", game.stockMultiplier()) + ")", TOAST_LONG);
             }
         }
@@ -1121,28 +1169,39 @@ public class EmojiSnakeApp extends Application {
             camera.reset();
             particles.clear();
             headTrail.clear();
-            lives = maxLives();
+            resetRunState();
             started = false;          // a fresh run waits for press-to-start...
             countedThisGame = false;  // ...and counts toward gamesPlayed on the first move
             newBest = false;
             mercyMsg = "";
-            resumeIsRevive = false;
-            vnSeenThisRun.clear();    // a fresh run may see any novel again
             startQuote = pick(QUOTES);
-            interlude = null;
-            lastLevel = 1;
-            lastScore = 0;
-            downStreak = 0;
-            secretUsed = false;
-            secretHinted = false;
-            memeFlashTimer = 0;
-            inputLockoutT = 0;
-            accumulatorNanos = 0;
             lastNanos = 0;
-            hitstopFrames = 0;
-            fakeCrashUsedThisRun = false; // one fake crash per run
-            floorThisRun = 0;             // back-room floor progress does NOT carry across a death
         }
+    }
+
+    /**
+     * Reset every per-run field. Shared by a real {@link #restart} and the {@code --play} harness
+     * fixture ({@code beginPlay}), so the harness models the exact state a fresh run has - a field
+     * forgotten in one of two hand-kept lists used to mean state leaking across runs, or the
+     * self-play testing a state real runs never see.
+     */
+    private void resetRunState() {
+        interlude = null;
+        resumeIsRevive = false;
+        lives = maxLives();
+        lastLevel = 1;
+        lastScore = 0;
+        downStreak = 0;
+        secretUsed = false;
+        secretHinted = false;
+        memeFlashTimer = 0;
+        inputLockoutT = 0;
+        escQuitT = 0;
+        accumulatorNanos = 0;
+        hitstopFrames = 0;
+        fakeCrashUsedThisRun = false; // one fake crash per run
+        floorThisRun = 0;             // back-room floor progress does NOT carry across a death
+        vnSeenThisRun.clear();        // a fresh run may see any novel again
     }
 
     // --- rendering -----------------------------------------------------------
@@ -1307,7 +1366,8 @@ public class EmojiSnakeApp extends Application {
         gc.setTextBaseline(VPos.CENTER);
         atlas.draw(gc, Tile.HEAD, 12, mid - 16, 32);
 
-        gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 20));
+        Font hudFont = Font.font("Segoe UI", FontWeight.BOLD, 20);
+        gc.setFont(hudFont);
         gc.setTextAlign(TextAlignment.LEFT);
         gc.setFill(Color.WHITE);
         String scoreStr = "Score " + game.score();
@@ -1317,7 +1377,7 @@ public class EmojiSnakeApp extends Application {
         // never widens into - and hides behind - the centered "Best" text.
         if (lives > 0) {
             gc.setFill(Color.web("#ff5a6a"));
-            double heartsX = 52 + scoreStr.length() * 12.0 + 14;
+            double heartsX = 52 + TextFit.width(scoreStr, hudFont) + 14; // measured, not chars×px
             String hearts = lives <= 3 ? "♥".repeat(lives) : "♥×" + lives;
             gc.fillText(hearts, heartsX + j, mid + j);
         }
@@ -1343,7 +1403,7 @@ public class EmojiSnakeApp extends Application {
         if (game.shares() > 0) {
             gc.setFill(STOCK_GREEN);
             gc.fillText(String.format(Locale.ROOT, "▲%.1fx", game.stockMultiplier()),
-                    WIDTH - 14 - lvlStr.length() * 11.0 - 12 + j, mid + j);
+                    WIDTH - 14 - TextFit.width(lvlStr, hudFont) - 12 + j, mid + j);
         }
     }
 
@@ -1400,7 +1460,9 @@ public class EmojiSnakeApp extends Application {
             crt.draw(gc, 0.12 + corruption * 0.5);
         }
 
-        if (toastTimer > 0 && game.status() == GameState.Status.RUNNING && started) {
+        // Toasts show in play - and whenever the quit prompt is armed, which can happen on the
+        // start/game-over screens too (the arming toast is by construction the most recent one).
+        if (toastTimer > 0 && ((game.status() == GameState.Status.RUNNING && started) || escQuitT > 0)) {
             gc.setTextAlign(TextAlignment.CENTER);
             gc.setTextBaseline(VPos.CENTER);
             gc.setFont(TextFit.fit(toast, "Consolas", FontWeight.BOLD, 26, WIDTH - 40));
@@ -1474,20 +1536,31 @@ public class EmojiSnakeApp extends Application {
      * press-to-start screen instead of gameplay.
      */
     private void renderSnapshotAndExit(String arg) {
-        if (arg.contains("boss") || arg.contains("crash")) {
-            renderInterludeSnapshotAndExit(arg.contains("boss"));
+        // The takeover screens all snapshot the same way; only the interlude + warm-up frames vary.
+        if (arg.contains("boss")) {
+            snapshotInterludeAndExit(new DodgeBossInterlude(atlas, WIDTH, HEIGHT, 3), 120,
+                    "snapshot-boss.png"); // 120 frames populate the projectiles
+            return;
+        }
+        if (arg.contains("crash")) {
+            snapshotInterludeAndExit(new FakeCrashInterlude(), 120, "snapshot-crash.png");
             return;
         }
         if (arg.contains("vn")) {
-            renderVnSnapshotAndExit();
+            // Fixed novel (null rng keeps authored choice order); enough frames to reveal the line.
+            snapshotInterludeAndExit(new VisualNovelInterlude(VisualNovels.all().get(0), vnArt, true, null),
+                    260, "snapshot-vn.png");
             return;
         }
         if (arg.contains("store")) {
-            renderStoreSnapshotAndExit();
+            game = new GameState(COLS, ROWS, 42L);
+            game.addScore(160); // give the shopper something to spend (shows several rows affordable)
+            snapshotInterludeAndExit(new StoreInterlude(game, atlas, WIDTH, HEIGHT, 2, MAX_FLOORS, 1,
+                    MAX_LIFE_BONUS, 3, 5, 1, MAX_TRIM, false), 30, "snapshot-store.png");
             return;
         }
         if (arg.contains("slot")) {
-            renderSlotSnapshotAndExit();
+            snapshotInterludeAndExit(new SlotInterlude(atlas), 190, "snapshot-slot.png"); // past the reveal
             return;
         }
         boolean corrupt = arg.contains("corrupt");
@@ -1533,12 +1606,28 @@ public class EmojiSnakeApp extends Application {
         render(snap);
         particles.update(0.016);
 
+        writePng(startScreen ? "snapshot-start.png"
+                : shed ? "snapshot-shed.png"
+                : corrupt ? "snapshot-corrupt.png" : "snapshot.png");
+        Platform.exit();
+    }
+
+    /** Warm an interlude a few frames, lay out, render it alone, write {@code build/<pngName>}, exit. */
+    private void snapshotInterludeAndExit(Interlude il, int warmFrames, String pngName) {
+        for (int i = 0; i < warmFrames; i++) {
+            il.update(1.0 / 60.0);
+        }
+        Scene scene = new Scene(layers.root(), WIDTH, HEIGHT, BG); // a Scene triggers the layout pass
+        layers.clearAll();
+        il.render(layers.overlay(), WIDTH, HEIGHT);
+        writePng(pngName);
+        Platform.exit();
+    }
+
+    /** Snapshot the render root into {@code build/<name>} - the shared tail of every --snapshot mode. */
+    private void writePng(String name) {
         try {
-            SnapshotParameters params = new SnapshotParameters();
-            WritableImage image = layers.root().snapshot(params, new WritableImage(WIDTH, HEIGHT));
-            String name = startScreen ? "snapshot-start.png"
-                    : shed ? "snapshot-shed.png"
-                    : corrupt ? "snapshot-corrupt.png" : "snapshot.png";
+            WritableImage image = layers.root().snapshot(new SnapshotParameters(), new WritableImage(WIDTH, HEIGHT));
             File out = new File("build/" + name);
             Files.createDirectories(out.getParentFile().toPath());
             javax.imageio.ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", out);
@@ -1546,106 +1635,6 @@ public class EmojiSnakeApp extends Application {
         } catch (Exception e) {
             System.err.println("Snapshot failed: " + e.getMessage());
         }
-        Platform.exit();
-    }
-
-    private void renderInterludeSnapshotAndExit(boolean boss) {
-        Interlude il = boss ? new DodgeBossInterlude(atlas, WIDTH, HEIGHT, 3) : new FakeCrashInterlude();
-        for (int i = 0; i < 120; i++) {
-            il.update(1.0 / 60.0); // populate projectiles / advance the trace
-        }
-        Scene scene = new Scene(layers.root(), WIDTH, HEIGHT, BG);
-        layers.clear(layers.bg());
-        layers.clear(layers.trail());
-        layers.clear(layers.entity());
-        layers.clear(layers.overlay());
-        il.render(layers.overlay(), WIDTH, HEIGHT);
-        try {
-            SnapshotParameters params = new SnapshotParameters();
-            WritableImage image = layers.root().snapshot(params, new WritableImage(WIDTH, HEIGHT));
-            File out = new File("build/" + (boss ? "snapshot-boss.png" : "snapshot-crash.png"));
-            Files.createDirectories(out.getParentFile().toPath());
-            javax.imageio.ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", out);
-            System.out.println("Wrote " + out.getAbsolutePath());
-        } catch (Exception e) {
-            System.err.println("Snapshot failed: " + e.getMessage());
-        }
-        Platform.exit();
-    }
-
-    private void renderVnSnapshotAndExit() {
-        // Fixed novel; advance enough to fully reveal the opening line so the choices show.
-        VisualNovelInterlude vn = new VisualNovelInterlude(VisualNovels.all().get(0), vnArt, true, null);
-        for (int i = 0; i < 260; i++) {
-            vn.update(1.0 / 60.0);
-        }
-        Scene scene = new Scene(layers.root(), WIDTH, HEIGHT, BG);
-        layers.clear(layers.bg());
-        layers.clear(layers.trail());
-        layers.clear(layers.entity());
-        layers.clear(layers.overlay());
-        vn.render(layers.overlay(), WIDTH, HEIGHT);
-        try {
-            SnapshotParameters params = new SnapshotParameters();
-            WritableImage image = layers.root().snapshot(params, new WritableImage(WIDTH, HEIGHT));
-            File out = new File("build/snapshot-vn.png");
-            Files.createDirectories(out.getParentFile().toPath());
-            javax.imageio.ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", out);
-            System.out.println("Wrote " + out.getAbsolutePath());
-        } catch (Exception e) {
-            System.err.println("Snapshot failed: " + e.getMessage());
-        }
-        Platform.exit();
-    }
-
-    private void renderStoreSnapshotAndExit() {
-        game = new GameState(COLS, ROWS, 42L);
-        game.addScore(160); // give the shopper something to spend (shows several rows affordable)
-        StoreInterlude store = new StoreInterlude(game, atlas, WIDTH, HEIGHT, 2, MAX_FLOORS, 1, MAX_LIFE_BONUS, 3, 5, 1, MAX_TRIM, false);
-        for (int i = 0; i < 30; i++) {
-            store.update(1.0 / 60.0);
-        }
-        Scene scene = new Scene(layers.root(), WIDTH, HEIGHT, BG);
-        layers.clear(layers.bg());
-        layers.clear(layers.trail());
-        layers.clear(layers.entity());
-        layers.clear(layers.overlay());
-        store.render(layers.overlay(), WIDTH, HEIGHT);
-        try {
-            SnapshotParameters params = new SnapshotParameters();
-            WritableImage image = layers.root().snapshot(params, new WritableImage(WIDTH, HEIGHT));
-            File out = new File("build/snapshot-store.png");
-            Files.createDirectories(out.getParentFile().toPath());
-            javax.imageio.ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", out);
-            System.out.println("Wrote " + out.getAbsolutePath());
-        } catch (Exception e) {
-            System.err.println("Snapshot failed: " + e.getMessage());
-        }
-        Platform.exit();
-    }
-
-    private void renderSlotSnapshotAndExit() {
-        SlotInterlude slot = new SlotInterlude(atlas);
-        for (int i = 0; i < 190; i++) { // advance past the reveal (~3.1s)
-            slot.update(1.0 / 60.0);
-        }
-        Scene scene = new Scene(layers.root(), WIDTH, HEIGHT, BG);
-        layers.clear(layers.bg());
-        layers.clear(layers.trail());
-        layers.clear(layers.entity());
-        layers.clear(layers.overlay());
-        slot.render(layers.overlay(), WIDTH, HEIGHT);
-        try {
-            SnapshotParameters params = new SnapshotParameters();
-            WritableImage image = layers.root().snapshot(params, new WritableImage(WIDTH, HEIGHT));
-            File out = new File("build/snapshot-slot.png");
-            Files.createDirectories(out.getParentFile().toPath());
-            javax.imageio.ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", out);
-            System.out.println("Wrote " + out.getAbsolutePath());
-        } catch (Exception e) {
-            System.err.println("Snapshot failed: " + e.getMessage());
-        }
-        Platform.exit();
     }
 
     // --- self-play test harness (--play) ------------------------------------
@@ -1700,6 +1689,9 @@ public class EmojiSnakeApp extends Application {
         runOne(only, "fleeing", this::playFleeing);
         runOne(only, "funny67", this::playFunny67);
         runOne(only, "gaslight", this::playGaslight);
+        runOne(only, "boss", this::playBoss);
+        runOne(only, "crash", this::playCrash);
+        runOne(only, "fx-attach", this::playFxAttach);
         runOne(only, "secret", this::playSecret);
         runOne(only, "descend", this::playDescend);
         runOne(only, "vn-norepeat", this::playVnNoRepeat);
@@ -1747,22 +1739,9 @@ public class EmojiSnakeApp extends Application {
         game.setMechanicsEnabled(true);
         game.setStoreEnabled(true);
         game.setInitialDirection(Direction.RIGHT);
-        interlude = null;
-        started = true;
-        resumeIsRevive = false;
+        resetRunState();
+        started = true;         // the harness drives the run directly - no press-to-start gate
         countedThisGame = true;
-        lives = maxLives();
-        hitstopFrames = 0;
-        memeFlashTimer = 0;
-        inputLockoutT = 0;
-        lastScore = 0;
-        lastLevel = 1;
-        downStreak = 0;
-        secretUsed = false;
-        secretHinted = false;
-        vnSeenThisRun.clear();
-        floorThisRun = 0;
-        accumulatorNanos = 0;
         return game;
     }
 
@@ -2040,6 +2019,89 @@ public class EmojiSnakeApp extends Application {
         check(game.status() == GameState.Status.RUNNING, "the gaslight crash should revive, not end the run");
         check(!started, "after the crash it waits at the press-to-continue gate");
         check(!game.obstacles().contains(wall), "revive should break the wall so it vanishes (the gaslight)");
+    }
+
+    private void playBoss() {
+        // Flawless: +25, a ghost, and a clean hand-back to the crawl prompt.
+        beginPlay(5L);
+        DodgeBossInterlude boss = new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives);
+        interlude = boss;
+        playRenderAndSnap("arena");
+        int scoreBefore = game.score();
+        boss.forceHits(0);
+        check(boss.isDone(), "forceHits must spend the fight's timeline");
+        finishInterlude();
+        check(interlude == null, "flawless boss did not resume");
+        check(game.score() == scoreBefore + 25, "flawless reward not paid: " + game.score());
+        check(game.hasStatus(StatusKind.GHOST), "flawless dodge must grant the ghost");
+        check(!started, "the resume must wait at the crawl prompt, never auto-move");
+
+        // Bitten: exactly one life spent - unless the ANNOUNCED mercy refund fires (the app's own
+        // rng decides; range-assert rather than seeding it, which would shift every pick()).
+        beginPlay(6L);
+        int livesBefore = lives;
+        boss = new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives);
+        interlude = boss;
+        boss.forceHits(1);
+        finishInterlude();
+        check(lives == livesBefore - 1 || lives == livesBefore,
+                "one bite must cost one life (or be refunded): " + livesBefore + " -> " + lives);
+        check(lives == livesBefore - 1 || mercyMsg.contains("spat"),
+                "a refunded life must be announced, never silent");
+        check(interlude == null && !started, "bitten boss did not hand back to the crawl prompt");
+
+        // Every life: the run must end for real.
+        beginPlay(7L);
+        boss = new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives);
+        interlude = boss;
+        boss.forceHits(lives);
+        finishInterlude();
+        check(lives == 0, "losing every life must zero the counter: " + lives);
+        check(game.status() == GameState.Status.GAME_OVER, "0 lives must end the run");
+        playRenderAndSnap("gameover");
+    }
+
+    private void playCrash() {
+        beginPlay(8L);
+        // The once-per-run gate, proven RNG-free: with the crash already spent, the short-circuit
+        // means a fresh level-up observation can't even roll the dice, let alone re-arm it.
+        fakeCrashUsedThisRun = true;
+        lastLevel = 0; // re-observe level 1 as "new"
+        checkLevelUp();
+        check(interlude == null, "a spent fake crash must not fire again this run");
+
+        // Arm it: each observation rolls FAKECRASH_CHANCE; 400 tries make a full miss ~1e-43.
+        fakeCrashUsedThisRun = false;
+        for (int i = 0; i < 400 && interlude == null; i++) {
+            lastLevel = 0;
+            checkLevelUp();
+        }
+        check(interlude instanceof FakeCrashInterlude, "the fake crash never armed in 400 level-ups");
+        check(fakeCrashUsedThisRun, "arming must spend the once-per-run gate");
+        if (interlude instanceof FakeCrashInterlude) {
+            interlude.update(1.0);            // mid stack-trace
+            interlude.handleKey(KeyCode.SPACE);
+            interlude.handleKey(KeyCode.ENTER);
+            check(!interlude.isDone(), "the fake crash must be unskippable mid-timeline");
+            playRenderAndSnap("trace");
+            for (int i = 0; i < 400 && !interlude.isDone(); i++) {
+                interlude.update(1.0 / 60);
+            }
+            check(interlude.isDone(), "the fake crash must end on its own timeline");
+            finishInterlude();
+            check(interlude == null && !started, "the false alarm did not hand back to the crawl prompt");
+            check(mercyMsg.contains("false alarm"), "the resume line should wink at the illusion");
+        }
+    }
+
+    private void playFxAttach() {
+        // Regression guard for the masked bug: the pre-wake SUPER-plain branch strips the node-effect
+        // chain off the content group every frame, and nothing used to hook it back after the wake -
+        // every real session silently lost hue/warp/blur/bloom. FxDirector.update() now self-heals.
+        beginPlay(9L);
+        layers.content().setEffect(null); // exactly what the plain frames do
+        playRenderAndSnap("healed");      // the meta render path runs fx.update(...)
+        check(layers.content().getEffect() != null, "the effect chain must re-attach once meta renders");
     }
 
     private void playSecret() {

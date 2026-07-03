@@ -5,11 +5,11 @@ import java.security.MessageDigest;
 import java.util.Base64;
 
 /**
- * Light tamper-resistance for the save files (highscore / progress / meta). This is NOT real
- * cryptographic security - the key ships inside the binary - but it makes the files opaque (XOR +
- * Base64) and tamper-EVIDENT: a truncated keyed digest is appended, so hand-editing the encoded value
- * breaks the digest and the game quietly ignores it (resets that value). Each store keeps a legacy
- * plain-text fallback on load, so pre-existing saves migrate to the encoded form on the next write.
+ * Light tamper-resistance for the single save file ({@code save.dat}). This is NOT real
+ * cryptographic security - the key ships inside the binary - but it makes the file opaque (XOR +
+ * Base64) and tamper-EVIDENT: a truncated keyed digest is appended, so hand-editing (or a truncated
+ * write) breaks the digest and the game quietly ignores the file, starting from a clean slate.
+ * {@code SaveStore.migrateLegacy} still decodes the pre-consolidation split files on first load.
  */
 public final class SaveCodec {
 

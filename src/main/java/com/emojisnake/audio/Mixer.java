@@ -75,10 +75,6 @@ public final class Mixer {
         }
     }
 
-    public int polyphony() {
-        return POLYPHONY;
-    }
-
     int activeVoiceCount() {
         int n = 0;
         for (Voice v : voices) {

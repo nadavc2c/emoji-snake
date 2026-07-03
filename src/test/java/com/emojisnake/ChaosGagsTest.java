@@ -152,6 +152,26 @@ class ChaosGagsTest {
     }
 
     @Test
+    void forcedSpecialFoodsAreMutuallyExclusive() {
+        // Regression pin for the FoodKind exclusivity: forcing one special on top of another must
+        // REPLACE the kind, not stack it (the old boolean quartet could leave 📦+📈 both true and
+        // double-fire their notices from a single bite).
+        GameState g = new GameState(20, 20, 5L);
+        g.forceBoxFood(new Point(11, 10));   // 📦 first...
+        g.forceStockFood(new Point(11, 10)); // ...then re-force the same cell as 📈
+        assertFalse(g.isBoxFood(), "re-forcing replaces the kind - no stacking");
+
+        GameState.Event e = g.tick();        // eat it
+
+        assertSame(GameState.Event.ATE_FOOD, e);
+        java.util.List<GameState.Notice> notices = g.drainNotices();
+        assertTrue(notices.stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.STOCK),
+                "the bite fires the 📈 STOCK notice");
+        assertFalse(notices.stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.BOX),
+                "no phantom BOX notice from the overwritten force");
+    }
+
+    @Test
     void allGagsStayOffByDefault() {
         // The OFF-by-default contract for the new gags: a plain seeded game plays byte-identically to
         // one with every new gag left disabled (no extra RNG, no new entities).

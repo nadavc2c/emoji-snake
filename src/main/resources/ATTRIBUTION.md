@@ -46,5 +46,4 @@ point. Roles in the game:
 | `1F300.png` | 🌀    | Portal                        |
 | `1F479.png` | 👹    | Boss                          |
 | `1F534.png` | 🔴    | Boss projectile               |
-| `1F4A5.png` | 💥    | Impact                        |
 | `1F48E.png` | 💎    | (legacy gem, retained)        |

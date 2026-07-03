@@ -57,10 +57,6 @@ final class Voice {
         this.sweeping = true;
     }
 
-    void noteOff() {
-        env.release();
-    }
-
     boolean isActive() {
         return active;
     }

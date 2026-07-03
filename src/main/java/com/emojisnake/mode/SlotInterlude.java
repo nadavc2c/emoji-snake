@@ -23,7 +23,6 @@ public final class SlotInterlude implements Interlude {
     };
     private static final double[] STOP = {1.2, 1.8, 2.4}; // when each reel locks
     private static final double REVEAL = 2.8;
-    private static final double TOTAL = 5.0;
     private static final int MAX = 6;
 
     private final EmojiAtlas atlas;

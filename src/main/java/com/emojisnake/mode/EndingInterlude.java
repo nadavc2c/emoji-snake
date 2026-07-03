@@ -1,5 +1,6 @@
 package com.emojisnake.mode;
 
+import com.emojisnake.fx.TextFit;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.input.KeyCode;
@@ -80,10 +81,10 @@ public final class EndingInterlude implements Interlude {
         double maxWidth = w - 40;
 
         gc.setTextAlign(TextAlignment.CENTER);
-        gc.setFont(fit(b.big(), 30, FontWeight.BOLD, maxWidth));
+        gc.setFont(TextFit.fit(b.big(), "Consolas", FontWeight.BOLD, 30, maxWidth));
         gc.setFill(Color.web("#ffd54a"));
         gc.fillText(b.big(), w / 2, h * 0.72);
-        gc.setFont(fit(b.small(), 17, FontWeight.NORMAL, maxWidth));
+        gc.setFont(TextFit.fit(b.small(), "Consolas", FontWeight.NORMAL, 17, maxWidth));
         gc.setFill(Color.web("#eaf4ea"));
         gc.fillText(b.small(), w / 2, h * 0.78);
 
@@ -98,11 +99,4 @@ public final class EndingInterlude implements Interlude {
         }
     }
 
-    private static Font fit(String text, double base, FontWeight weight, double maxWidth) {
-        Font f = Font.font("Consolas", weight, base);
-        javafx.scene.text.Text probe = new javafx.scene.text.Text(text);
-        probe.setFont(f);
-        double measured = probe.getLayoutBounds().getWidth();
-        return measured > maxWidth ? Font.font("Consolas", weight, base * maxWidth / measured) : f;
-    }
 }

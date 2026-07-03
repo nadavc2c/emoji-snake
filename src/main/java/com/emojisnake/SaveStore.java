@@ -1,8 +1,10 @@
 package com.emojisnake;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 /**
  * The single save file. Everything persistent lives in ONE working-directory file, {@code save.dat}
@@ -52,7 +54,9 @@ public final class SaveStore {
                 if (decoded != null) {
                     return parse(decoded);
                 }
-                return parse(Files.readString(file)); // legacy plain-text fallback
+                // A failed digest means corruption or tampering - never parse it as plain text
+                // (every real version has always written save.dat encoded). Fresh slate instead.
+                return new Save(0, 0, false);
             }
             return migrateLegacy(); // first run on this version: fold in the old split files (if any)
         } catch (IOException | NumberFormatException ignored) {
@@ -61,13 +65,27 @@ public final class SaveStore {
     }
 
     public void save(Save s) {
+        String encoded = SaveCodec.encode(
+                "high=" + s.highScore() + "\ngames=" + s.gamesPlayed()
+                + "\nrank=" + s.rank() + "\nmaxlife=" + s.maxLifeBonus()
+                + "\nended=" + s.ended() + "\ntrim=" + s.trim() + "\n");
         try {
-            String content = "high=" + s.highScore() + "\ngames=" + s.gamesPlayed()
-                    + "\nrank=" + s.rank() + "\nmaxlife=" + s.maxLifeBonus()
-                    + "\nended=" + s.ended() + "\ntrim=" + s.trim() + "\n";
-            Files.writeString(file, SaveCodec.encode(content));
+            // Write-then-move so a mid-write kill can't truncate the only copy of the save.
+            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.writeString(tmp, encoded);
+            try {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException ignored) {
-            // best-effort persistence
+            // Best-effort persistence: as a last resort (e.g. an AV briefly locking the move target),
+            // fall back to the direct write rather than silently saving nothing.
+            try {
+                Files.writeString(file, encoded);
+            } catch (IOException alsoIgnored) {
+                // give up quietly - same contract as before
+            }
         }
     }
 

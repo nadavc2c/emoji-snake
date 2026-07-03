@@ -182,6 +182,9 @@ public final class StoreInterlude implements Interlude {
 
     @Override
     public void handleKey(KeyCode code) {
+        if (isDone()) {
+            return; // checkout is closed - key-repeat must not double-charge before the app resumes
+        }
         switch (code) {
             case DIGIT1 -> buyPowerUp(0);
             case DIGIT2 -> buyPowerUp(1);

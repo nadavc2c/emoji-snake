@@ -55,10 +55,9 @@ public enum Tile {
 
     PORTAL("1F300"),    // 🌀 paired teleport
 
-    // Boss encounter (later phase).
+    // Boss encounter.
     BOSS("1F479"),      // 👹
-    PROJECTILE("1F534"),// 🔴
-    BOOM("1F4A5");      // 💥
+    PROJECTILE("1F534");// 🔴
 
     private static final Tile[] FOODS =
             {FOOD_APPLE, FOOD_PIZZA, FOOD_BURGER, FOOD_TACO, FOOD_DONUT, FOOD_MEAT};

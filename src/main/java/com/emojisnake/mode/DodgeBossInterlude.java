@@ -99,6 +99,16 @@ public final class DodgeBossInterlude implements Interlude {
         return hits;
     }
 
+    /**
+     * Self-play seam ({@code --play:boss}): end the fight NOW with exactly {@code n} hits (clamped
+     * to the fight's real range). Also spends the timeline, so {@code update()} never runs again
+     * and the interlude's own RNG can't drift the count - fully deterministic for the harness.
+     */
+    public void forceHits(int n) {
+        this.hits = Math.max(0, Math.min(startingLives, n));
+        this.elapsed = DURATION;
+    }
+
     @Override
     public void render(GraphicsContext gc, double w, double h) {
         gc.setFill(Color.web("#0a0712"));

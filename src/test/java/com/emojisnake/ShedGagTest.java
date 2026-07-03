@@ -128,6 +128,26 @@ class ShedGagTest {
     }
 
     @Test
+    void theLoneHeadCanEatTheCureEggWhileDetached() {
+        // The 🥚 cures a head-state, and the head is the part that's here - unlike the mechanic
+        // pickups (book/slot/stock), which pass through untouched while split.
+        GameState g = longSnake();              // head (13,10), heading right
+        g.forceShed();
+        g.forceFood(new Point(0, 0));           // park food; we're after the cure
+        g.forceBasilisk(new Point(14, 10));     // egg dead ahead of the lone head
+        g.drainNotices();                       // clear the SHED notice
+
+        GameState.Event e = g.tick();           // head -> (14,10): eat the cure
+
+        assertSame(GameState.Event.ATE_BONUS, e, "the egg is edible mid-shed");
+        assertFalse(g.isBasilisk(), "the cure works while detached");
+        assertTrue(g.isDetached(), "curing doesn't end the shed gag");
+        assertEquals(1, g.length(), "the egg is a cure, not food - no growth");
+        assertTrue(g.drainNotices().stream().anyMatch(n -> n.kind() == GameState.Notice.Kind.CURE),
+                "the CURE notice fires so the app can toast it");
+    }
+
+    @Test
     void touchingTheFrozenBodyKillsTheLoneHead() {
         GameState g = longSnake();
         g.forceShed();                          // head (13,10); frozen body along row 10

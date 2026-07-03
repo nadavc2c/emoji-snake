@@ -31,6 +31,8 @@ final class Envelope {
         level = 0;
     }
 
+    // Kept for ADSR completeness: no live caller since Voice.noteOff was removed (every production
+    // note fires with sustain 0 and self-terminates), but the RELEASE stage is part of the primitive.
     void release() {
         if (stage != Stage.IDLE) {
             stage = Stage.RELEASE;

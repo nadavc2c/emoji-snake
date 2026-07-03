@@ -13,8 +13,10 @@ package com.emojisnake;
  *       rises with the game level, plus transient bumps (bonus gems) that decay back to it.</li>
  * </ul>
  *
- * <p>Phase 1 feeds this from the existing {@link GameState.Event} stream and per-frame state;
- * later phases will route the richer {@code drainEvents()} queue through {@link #registerEvent}.
+ * <p>Fed from the {@link GameState.Event} stream ({@link #registerEvent}) and per-frame state
+ * ({@link #update}). The richer side-events took a different route in the end: they surface as
+ * {@code GameState.drainNotices()} and are consumed by the app's {@code onNotice} for juice/toasts,
+ * not by this model.
  */
 public final class IntensityModel {
 

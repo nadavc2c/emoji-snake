@@ -8,9 +8,9 @@ import javafx.scene.input.KeyCode;
  * happening" surprises: a genre-shift mini-game, a fake crash, etc. The app suspends the normal
  * Snake loop while one is active, delegates to it, and resumes when {@link #isDone()} is true.
  *
- * <p>This is the lightweight stand-in for a full mode stack: it covers the two surprise interludes
- * we need without restructuring the whole app, and can be promoted to a proper {@code ModeManager}
- * later if more modes pile up.
+ * <p>This is the lightweight stand-in for a full mode stack: it covers the whole surprise roster
+ * (boss / fake crash / visual novel / store / slot / secret / ending) without restructuring the
+ * app, and can be promoted to a proper {@code ModeManager} later if more modes pile up.
  */
 public interface Interlude {
 

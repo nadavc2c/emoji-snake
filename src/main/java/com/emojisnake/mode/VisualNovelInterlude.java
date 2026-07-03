@@ -6,6 +6,7 @@ import com.emojisnake.vn.Story;
 import com.emojisnake.vn.StoryNode;
 import com.emojisnake.vn.StoryState;
 import java.util.List;
+import java.util.Locale;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.effect.BlendMode;
 import javafx.scene.image.Image;
@@ -317,7 +318,7 @@ public final class VisualNovelInterlude implements Interlude {
         gc.setFill(Color.web("#ffffff", 0.92));
         gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 116));
         String initial = (cur.speaker() == null || cur.speaker().isBlank())
-                ? "?" : cur.speaker().substring(0, 1).toUpperCase();
+                ? "?" : cur.speaker().substring(0, 1).toUpperCase(Locale.ROOT);
         gc.fillText(initial, px + size / 2, py + size / 2 + 40);
         gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 16));
         gc.setFill(Color.web("#ffffff", 0.6));
@@ -405,13 +406,15 @@ public final class VisualNovelInterlude implements Interlude {
         if (((int) (elapsed * 2)) % 2 != 0) {
             return; // blink
         }
+        // "press a key", not "any key" - only play keys advance (Interlude.isAdvanceKey), and the
+        // house rule is that the copy never lies about that.
         String msg;
         if (cur.lethal()) {
-            msg = "[ a life ends. press any key. ]";
+            msg = "[ a life ends. press a key. ]";
         } else if (cur.reward() > 0) {
-            msg = "[ +" + cur.reward() + " pts. press any key. ]";
+            msg = "[ +" + cur.reward() + " pts. press a key. ]";
         } else {
-            msg = "[ press any key. ]";
+            msg = "[ press a key. ]";
         }
         gc.setTextAlign(TextAlignment.CENTER);
         gc.setFont(Font.font("Consolas", FontWeight.BOLD, 16));

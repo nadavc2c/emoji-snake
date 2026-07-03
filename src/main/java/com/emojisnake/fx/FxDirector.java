@@ -38,6 +38,7 @@ public final class FxDirector {
 
     private final double width;
     private final double height;
+    private final Node content; // kept so update() can re-attach the chain after the plain phase
 
     private final ColorAdjust colorAdjust = new ColorAdjust();
     private final MotionBlur motionBlur = new MotionBlur();
@@ -53,6 +54,7 @@ public final class FxDirector {
     public FxDirector(Node content, double width, double height) {
         this.width = width;
         this.height = height;
+        this.content = content;
 
         // Chain wiring (source flows colorAdjust -> warp -> motionBlur -> bloom).
         warp.setInput(colorAdjust);
@@ -66,6 +68,12 @@ public final class FxDirector {
 
     /** Mutate the node-effect chain for this frame. */
     public void update(IntensitySnapshot snap, double phase, Direction dir) {
+        // Self-heal: the app's pre-wake "SUPER plain" branch strips the effect off the content node
+        // every frame; once the meta layer wakes and this runs instead, hook the chain back up.
+        if (content.getEffect() == null) {
+            content.setEffect(bloom);
+        }
+
         double corruption = snap.corruption();
         double intensity = snap.intensity();
 

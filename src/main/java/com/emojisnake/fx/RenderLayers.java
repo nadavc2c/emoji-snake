@@ -67,12 +67,18 @@ public final class RenderLayers {
         gc.clearRect(0, 0, width, height);
     }
 
+    /** Clear every layer (bg/trail/entity/overlay) - a blank slate for a takeover screen. */
+    public void clearAll() {
+        clear(bgGc);
+        clear(trailGc);
+        clear(entityGc);
+        clear(overlayGc);
+    }
+
     public Group root()              { return root; }
     public Group content()           { return content; }
     public GraphicsContext bg()      { return bgGc; }
     public GraphicsContext trail()   { return trailGc; }
     public GraphicsContext entity()  { return entityGc; }
     public GraphicsContext overlay() { return overlayGc; }
-    public double width()            { return width; }
-    public double height()           { return height; }
 }

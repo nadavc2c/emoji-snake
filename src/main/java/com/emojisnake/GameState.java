@@ -27,6 +27,9 @@ public final class GameState {
 
     public enum Status { RUNNING, PAUSED, GAME_OVER }
 
+    /** What the current food cell really is - one kind at a time, mutually exclusive by construction. */
+    enum FoodKind { PLAIN, BOOK, SLOT, STOCK, BOX }
+
     /** A richer side-channel event for juice/audio (power-ups, synergies, portals, the shed gag). */
     public record Notice(Kind kind, Element element) {
         public enum Kind { POWERUP, SYNERGY, PORTAL, SHED, RECONNECT, BOOK, FLEE, STORE, BASILISK, CURE, SLOT, STOCK, CRASH, BOX }
@@ -133,17 +136,15 @@ public final class GameState {
     private Direction direction;
     private final Deque<Direction> turnQueue = new ArrayDeque<>();
     private Point food;
+    private boolean foodRespawnPending; // a respawn found the board full; retry per tick as cells free up
     private Tile foodTile = Tile.FOOD_APPLE;
-    private boolean foodIsBook;     // the current food cell is the rare 📖 (opens the visual novel)
+    private FoodKind foodKind = FoodKind.PLAIN; // 📖/🎰/📈/📦 promotion of the current food (or PLAIN)
     private boolean booksEnabled;   // app opts in (only once the meta layer is awake)
     private boolean fleeingFoodEnabled; // food bolts when you get close (anti-magnet); app opts in
     private int foodFleesLeft;      // remaining flees for the current food (0 = it stays put)
     private boolean gambleEnabled;  // a food can be a 🎰 that adds random length; app opts in
-    private boolean foodIsSlot;     // the current food is a 🎰 gamble
     private boolean stocksEnabled;  // a food can be a 📈 stock; eating it compounds score; app opts in
-    private boolean foodIsStock;    // the current food is a 📈 stock (adds a portfolio share)
     private boolean boxEnabled;     // a food can be a 📦; eating it triggers the window-shrink; app opts in
-    private boolean foodIsBox;      // the current food is a 📦 ("walls closing in")
     private int shares;             // per-run portfolio size; score multiplier = 1 + shares*STOCK_YIELD
     private double scoreCarry;      // fractional score not yet realized (so +15%/share is smooth)
     private int pendingGrowth;      // length still owed (from a slot win), grown one segment per tick
@@ -243,8 +244,8 @@ public final class GameState {
         basilisk = false;
         egg = null;
         pendingGrowth = 0;
-        foodIsStock = false;
-        foodIsBox = false;
+        foodKind = FoodKind.PLAIN;
+        foodRespawnPending = false;
         shares = 0;          // the portfolio is per-run: it rallies within a run, then resets
         scoreCarry = 0;
 
@@ -301,7 +302,6 @@ public final class GameState {
             pendingGrowth += n;
         }
     }
-    public boolean isMercifulRun() { return speedScale < 1.0; }
 
     /** Award bonus points (e.g. surviving a boss interlude). */
     public void addScore(int points) { score += points; }
@@ -364,6 +364,7 @@ public final class GameState {
         speedMomentum = Math.max(0, speedMomentum * 0.5);
         if (food == null || snakeCells.contains(food)) {
             food = randomFreeCell();
+            foodRespawnPending = food == null;
         }
         status = Status.RUNNING;
     }
@@ -417,6 +418,13 @@ public final class GameState {
         if (basilisk && egg == null) {
             egg = randomFreeCell(); // re-attempt the cure if the board was full when it transformed
         }
+        if (foodRespawnPending && food == null) {
+            food = randomFreeCell(); // re-attempt if the board was full when the last food was eaten
+            if (food != null) {
+                assignFoodTile();
+                foodRespawnPending = false;
+            }
+        }
         maybeGaslight(); // rarely, drop a wall two cells ahead with almost no time to react
 
         Point head = snake.peekFirst();
@@ -434,13 +442,8 @@ public final class GameState {
             }
         }
 
-        // Soft walls: wrap to the far side instead of dying, during early-game forgiveness or the
-        // brief grace window right after a revive.
-        boolean hitsWall = next.x() < 0 || next.y() < 0 || next.x() >= cols || next.y() >= rows;
-        if (hitsWall && (level() <= wrapUntilLevel || wallGraceTicks > 0)) {
-            next = new Point(Math.floorMod(next.x(), cols), Math.floorMod(next.y(), rows));
-            hitsWall = false;
-        }
+        next = wrapIfForgiven(next);
+        boolean hitsWall = outOfBounds(next);
 
         // The store is a solid shop: bumping it opens the buy screen (app-side) instead of moving in.
         if (store != null && next.equals(store)) {
@@ -449,10 +452,10 @@ public final class GameState {
         }
 
         boolean ateFood = next.equals(food);
-        boolean ateBook = ateFood && foodIsBook;            // capture before the respawn overwrites it
-        boolean ateSlot = ateFood && foodIsSlot;            // 🎰 gamble for random length
-        boolean ateStock = ateFood && foodIsStock;          // 📈 adds a portfolio share (compounds score)
-        boolean ateBox = ateFood && foodIsBox;              // 📦 grows like food, but shrinks the window
+        boolean ateBook = ateFood && foodKind == FoodKind.BOOK;   // capture before the respawn overwrites it
+        boolean ateSlot = ateFood && foodKind == FoodKind.SLOT;   // 🎰 gamble for random length
+        boolean ateStock = ateFood && foodKind == FoodKind.STOCK; // 📈 adds a portfolio share (compounds score)
+        boolean ateBox = ateFood && foodKind == FoodKind.BOX;     // 📦 grows like food, but shrinks the window
         boolean ateMeat = ateFood && foodTile == Tile.FOOD_MEAT; // 🍖 can turn you basilisk
         boolean ateEgg = basilisk && egg != null && next.equals(egg); // the cure
         boolean ateBonus = bonus != null && next.equals(bonus);
@@ -460,18 +463,8 @@ public final class GameState {
         boolean grows = ateFood && !ateSlot; // normal food grows +1; a slot is a gamble (no direct grow)
         Point tail = snake.peekLast();
 
-        boolean hitsObstacle = obstacles.contains(next);
-        if (hitsObstacle && hasStatus(StatusKind.BURN)) {
-            obstacles.remove(next); // 🔥 burn straight through
-            hitsObstacle = false;
-        } else if (hitsObstacle && hasStatus(StatusKind.GHOST)) {
-            hitsObstacle = false;   // 👻 phase through
-        }
-        // Colliding with the tail is safe when it is about to move out of the way.
-        boolean hitsSelf = snakeCells.contains(next) && !(next.equals(tail) && !grows);
-        if (hitsSelf && hasStatus(StatusKind.GHOST)) {
-            hitsSelf = false;
-        }
+        boolean hitsObstacle = hitsObstacleAfterStatuses(next);
+        boolean hitsSelf = hitsSelfAfterStatuses(next, tail, grows);
 
         if (hitsWall || hitsObstacle || hitsSelf) {
             status = Status.GAME_OVER;
@@ -488,6 +481,7 @@ public final class GameState {
             gainScore(FOOD_POINTS); // scaled by GOLD x2 and the 📈 portfolio (this bite at the old rate)
             foodEaten++;
             food = randomFreeCell();
+            foodRespawnPending = food == null; // board momentarily full: retry per tick, don't starve
             assignFoodTile();
             if (ateStock) {
                 // Buy a share: the multiplier this bite used the OLD portfolio; the new share compounds
@@ -536,19 +530,7 @@ public final class GameState {
             powerUpElement = null;
         }
 
-        if (!grows) {
-            if (pendingGrowth > 0) {
-                pendingGrowth--; // slot-machine payout: keep the tail (grow one segment) this tick
-            } else {
-                Point removed = snake.removeLast();
-                // Only free the cell if no other segment still sits on it - while GHOST is active the
-                // head can phase onto a body cell, briefly putting that Point in the deque twice; freeing
-                // it on the first tail removal would desync snakeCells from the actual snake.
-                if (!snake.contains(removed)) {
-                    snakeCells.remove(removed);
-                }
-            }
-        }
+        retreatTailUnlessGrowing(grows);
 
         // Persistent "haircut": on each level-up, auto-shed a few tail segments so length stays
         // manageable (the deep-game enabler). Runs after growth so a fresh food still counts.
@@ -556,21 +538,7 @@ public final class GameState {
             trimTail(trimPerLevel);
         }
 
-        if (bonus != null && !spawnedBonusThisTick && --bonusTicksLeft <= 0) {
-            bonus = null;
-        }
-        if (powerUp != null && --powerUpTicksLeft <= 0) {
-            powerUp = null;
-            powerUpElement = null;
-        }
-
-        tickStatuses();
-        if (wallGraceTicks > 0) {
-            wallGraceTicks--;
-        }
-        if (hasStatus(StatusKind.MAGNET) && food != null) {
-            pullFoodTowardHead();
-        }
+        expireTimersAndStatuses(spawnedBonusThisTick);
 
         // Speed momentum: ramps up on eating, gently decays otherwise.
         if (ateFood) {
@@ -582,6 +550,86 @@ public final class GameState {
         maybeCrash();        // the market can correct a fat portfolio (self-caps the stock rally)
         maybeTriggerShed();
         return event;
+    }
+
+    // --- shared tick plumbing (both the attached and the detached step use these) ---------------
+
+    private boolean outOfBounds(Point p) {
+        return p.x() < 0 || p.y() < 0 || p.x() >= cols || p.y() >= rows;
+    }
+
+    /**
+     * Soft walls: wrap an out-of-bounds step to the far side instead of dying, during early-game
+     * forgiveness or the brief grace window right after a revive.
+     */
+    private Point wrapIfForgiven(Point next) {
+        if (outOfBounds(next) && (level() <= wrapUntilLevel || wallGraceTicks > 0)) {
+            return new Point(Math.floorMod(next.x(), cols), Math.floorMod(next.y(), rows));
+        }
+        return next;
+    }
+
+    /** Obstacle collision with the modifiers applied: 🔥 BURN consumes it, then 👻 GHOST phases. */
+    private boolean hitsObstacleAfterStatuses(Point next) {
+        boolean hits = obstacles.contains(next);
+        if (hits && hasStatus(StatusKind.BURN)) {
+            obstacles.remove(next); // 🔥 burn straight through
+            hits = false;
+        } else if (hits && hasStatus(StatusKind.GHOST)) {
+            hits = false;           // 👻 phase through
+        }
+        return hits;
+    }
+
+    /**
+     * Self-bite check. The tail cell is exempt only when it actually vacates this tick - eating
+     * or an owed slot payout keeps it in place, and then it's a real bite. 👻 GHOST phases through.
+     */
+    private boolean hitsSelfAfterStatuses(Point next, Point tail, boolean grows) {
+        boolean hits = snakeCells.contains(next) && !(next.equals(tail) && !grows && pendingGrowth == 0);
+        return hits && !hasStatus(StatusKind.GHOST);
+    }
+
+    /** Consume owed growth (keep the tail one tick per segment) or retreat the tail. */
+    private void retreatTailUnlessGrowing(boolean grows) {
+        if (grows) {
+            return;
+        }
+        if (pendingGrowth > 0) {
+            pendingGrowth--; // slot-machine payout: keep the tail (grow one segment) this tick
+        } else {
+            removeTailSegment();
+        }
+    }
+
+    /**
+     * Drop the last tail segment, freeing its cell only if no other segment still sits on it -
+     * while GHOST is active the head can phase onto a body cell, briefly putting that Point in the
+     * deque twice; freeing it on the first removal would desync snakeCells from the actual snake.
+     */
+    private void removeTailSegment() {
+        Point removed = snake.removeLast();
+        if (!snake.contains(removed)) {
+            snakeCells.remove(removed);
+        }
+    }
+
+    /** Shared end-of-tick upkeep: bonus/power-up clocks, statuses, wall grace, and the magnet. */
+    private void expireTimersAndStatuses(boolean spawnedBonusThisTick) {
+        if (bonus != null && !spawnedBonusThisTick && --bonusTicksLeft <= 0) {
+            bonus = null;
+        }
+        if (powerUp != null && --powerUpTicksLeft <= 0) {
+            powerUp = null;
+            powerUpElement = null;
+        }
+        tickStatuses();
+        if (wallGraceTicks > 0) {
+            wallGraceTicks--;
+        }
+        if (hasStatus(StatusKind.MAGNET) && food != null) {
+            pullFoodTowardHead();
+        }
     }
 
     /**
@@ -765,31 +813,33 @@ public final class GameState {
      */
     private void assignFoodTile() {
         foodTile = Tile.randomFood(rng);
-        foodIsBook = booksEnabled && rng.nextDouble() < BOOK_CHANCE * chaosScale();
-        if (foodIsBook) {
+        foodKind = FoodKind.PLAIN;
+        // Each promotion below short-circuits on "still plain" + its enabled flag BEFORE touching the
+        // RNG, so a disabled gag draws zero extra values (seeded tests) and an earlier hit skips the
+        // later rolls (the kinds stay mutually exclusive by construction).
+        if (booksEnabled && rng.nextDouble() < BOOK_CHANCE * chaosScale()) {
+            foodKind = FoodKind.BOOK;
             foodTile = Tile.BOOK;
         }
-        foodIsSlot = !foodIsBook && gambleEnabled && rng.nextDouble() < SLOT_CHANCE * chaosScale();
-        if (foodIsSlot) {
+        if (foodKind == FoodKind.PLAIN && gambleEnabled
+                && rng.nextDouble() < SLOT_CHANCE * chaosScale()) {
+            foodKind = FoodKind.SLOT;
             foodTile = Tile.SLOT;
         }
-        // A rare 📈 stock: eating it compounds your score (cookie-clicker rally). Guarded so a game
-        // with stocks off draws no extra RNG.
-        foodIsStock = !foodIsBook && !foodIsSlot && stocksEnabled
-                && rng.nextDouble() < STOCK_CHANCE * chaosScale();
-        if (foodIsStock) {
+        // A rare 📈 stock: eating it compounds your score (cookie-clicker rally).
+        if (foodKind == FoodKind.PLAIN && stocksEnabled
+                && rng.nextDouble() < STOCK_CHANCE * chaosScale()) {
+            foodKind = FoodKind.STOCK;
             foodTile = Tile.STOCK;
         }
-        // A 📦 "box" food: eats/grows like normal food but fires the window-shrink gag. Guarded so a
-        // game with the box off draws no extra RNG.
-        foodIsBox = !foodIsBook && !foodIsSlot && !foodIsStock && boxEnabled
-                && rng.nextDouble() < BOX_CHANCE * chaosScale();
-        if (foodIsBox) {
+        // A 📦 "box" food: eats/grows like normal food but fires the window-shrink gag.
+        if (foodKind == FoodKind.PLAIN && boxEnabled
+                && rng.nextDouble() < BOX_CHANCE * chaosScale()) {
+            foodKind = FoodKind.BOX;
             foodTile = Tile.BOX;
         }
-        // Only a rare LIVING food (worm/mouse/chick) flees; cooked food never runs. Guarded so a
-        // vanilla game draws no extra RNG.
-        boolean living = !foodIsBook && !foodIsSlot && !foodIsStock && !foodIsBox && fleeingFoodEnabled
+        // Only a rare LIVING food (worm/mouse/chick) flees; cooked food never runs.
+        boolean living = foodKind == FoodKind.PLAIN && fleeingFoodEnabled
                 && rng.nextDouble() < LIVING_FOOD_CHANCE * chaosScale();
         if (living) {
             foodTile = Tile.randomLiving(rng);
@@ -810,12 +860,7 @@ public final class GameState {
     /** Shed up to {@code n} tail segments (never below {@link #MIN_TRIM_LENGTH}) - the "haircut". */
     private void trimTail(int n) {
         for (int i = 0; i < n && snake.size() > MIN_TRIM_LENGTH; i++) {
-            Point removed = snake.removeLast();
-            // Keep snakeCells in sync, but only free the cell if no other segment still sits on it
-            // (GHOST can briefly put a Point in the deque twice) - mirrors the tail-removal in tick().
-            if (!snake.contains(removed)) {
-                snakeCells.remove(removed);
-            }
+            removeTailSegment();
         }
     }
 
@@ -893,14 +938,20 @@ public final class GameState {
      * lone snake keeps its new length and the frozen original body is tacked onto its tail.
      */
     private Event tickDetached() {
+        if (foodRespawnPending && food == null) {
+            food = randomFreeCell(); // re-attempt if the board was full when the last food was eaten
+            if (food != null) {
+                foodTile = Tile.randomFood(rng); // a detached respawn is always plain food
+                foodKind = FoodKind.PLAIN;
+                foodFleesLeft = 0;
+                foodRespawnPending = false;
+            }
+        }
         Point head = snake.peekFirst();
         Point next = head.step(direction);
 
-        boolean hitsWall = next.x() < 0 || next.y() < 0 || next.x() >= cols || next.y() >= rows;
-        if (hitsWall && (level() <= wrapUntilLevel || wallGraceTicks > 0)) {
-            next = new Point(Math.floorMod(next.x(), cols), Math.floorMod(next.y(), rows));
-            hitsWall = false;
-        }
+        next = wrapIfForgiven(next);
+        boolean hitsWall = outOfBounds(next);
 
         if (next.equals(reconnectNode)) {
             reattach(next);
@@ -910,24 +961,19 @@ public final class GameState {
 
         // While split, only PLAIN food (and the 📦 box - just food) is edible; the mechanic pickups
         // (📖 book / 🎰 slot / 📈 stock) and power-ups PASS THROUGH untouched, so a split can't waste a
-        // book (which would lock the ending) or farm free power-ups. Bonus gems stay grabbable (points).
-        boolean specialFood = foodIsBook || foodIsSlot || foodIsStock;
+        // book (which would lock the ending) or farm free power-ups. Bonus gems stay grabbable (points),
+        // and so is the 🥚 basilisk cure - it's a head-state fix, and the head is the part that's here.
+        boolean specialFood = foodKind == FoodKind.BOOK || foodKind == FoodKind.SLOT
+                || foodKind == FoodKind.STOCK;
         boolean ateFood = next.equals(food) && !specialFood;
+        boolean ateEgg = basilisk && egg != null && next.equals(egg);
         boolean ateBonus = bonus != null && next.equals(bonus);
         boolean grows = ateFood;
         Point tail = snake.peekLast();
 
-        boolean hitsFrozen = frozenCells.contains(next);
-        boolean hitsObstacle = obstacles.contains(next);
-        boolean hitsSelf = snakeCells.contains(next) && !(next.equals(tail) && !grows);
-        if (hasStatus(StatusKind.GHOST)) {
-            hitsFrozen = false;
-            hitsObstacle = false;
-            hitsSelf = false; // grace lets the head phase free
-        } else if (hitsObstacle && hasStatus(StatusKind.BURN)) {
-            obstacles.remove(next);
-            hitsObstacle = false;
-        }
+        boolean hitsFrozen = frozenCells.contains(next) && !hasStatus(StatusKind.GHOST);
+        boolean hitsObstacle = hitsObstacleAfterStatuses(next);
+        boolean hitsSelf = hitsSelfAfterStatuses(next, tail, grows);
         if (hitsWall || hitsFrozen || hitsObstacle || hitsSelf) {
             status = Status.GAME_OVER;
             return Event.CRASHED;
@@ -941,14 +987,19 @@ public final class GameState {
             gainScore(FOOD_POINTS); // the portfolio earned before shedding still compounds while detached
             foodEaten++;
             food = randomFreeCell();
+            foodRespawnPending = food == null; // board momentarily full: retry per tick, don't starve
             foodTile = Tile.randomFood(rng);
-            foodIsBook = false;
-            foodIsSlot = false;   // a detached respawn is always a plain food (no stacked gag)
-            foodIsStock = false;
-            foodIsBox = false;
+            foodKind = FoodKind.PLAIN; // a detached respawn is always plain food (no stacked gag)
             foodFleesLeft = 0;
             speedMomentum += 1;
             event = Event.ATE_FOOD;
+        } else if (ateEgg) {
+            // The 🥚 cures the basilisk even mid-shed: head back to a snake, food back to normal.
+            basilisk = false;
+            egg = null;
+            gainScore(BONUS_POINTS);
+            notices.add(new Notice(Notice.Kind.CURE, null));
+            event = Event.ATE_BONUS;
         } else if (ateBonus) {
             gainScore(BONUS_POINTS);
             bonus = null;
@@ -956,31 +1007,9 @@ public final class GameState {
         }
         // Power-ups are NOT consumed while detached - the head passes over them (see specialFood above).
 
-        if (!grows) {
-            if (pendingGrowth > 0) {
-                pendingGrowth--;
-            } else {
-                Point removed = snake.removeLast();
-                if (!snake.contains(removed)) {
-                    snakeCells.remove(removed);
-                }
-            }
-        }
+        retreatTailUnlessGrowing(grows);
 
-        if (bonus != null && --bonusTicksLeft <= 0) {
-            bonus = null;
-        }
-        if (powerUp != null && --powerUpTicksLeft <= 0) {
-            powerUp = null;
-            powerUpElement = null;
-        }
-        tickStatuses();
-        if (wallGraceTicks > 0) {
-            wallGraceTicks--;
-        }
-        if (hasStatus(StatusKind.MAGNET) && food != null) {
-            pullFoodTowardHead();
-        }
+        expireTimersAndStatuses(false); // nothing spawns a bonus while detached
         maybeCrash(); // the market corrects during the shed gag too (symmetric with tick())
         return event;
     }
@@ -1025,10 +1054,6 @@ public final class GameState {
 
     public boolean hasStatus(StatusKind kind) {
         return statuses.getOrDefault(kind, 0) > 0;
-    }
-
-    public int statusTicks(StatusKind kind) {
-        return statuses.getOrDefault(kind, 0);
     }
 
     public Set<StatusKind> activeStatuses() {
@@ -1120,11 +1145,8 @@ public final class GameState {
     /** True while the rare gag is active: body frozen as terrain, only the head moving. */
     public boolean isDetached() { return detached; }
 
-    /** True when the current food cell is the rare 📖 book (eating it opens the visual novel). */
-    public boolean isBookFood() { return foodIsBook; }
-
     /** True when the current food cell is a 🎰 slot gamble. */
-    public boolean isSlotFood() { return foodIsSlot; }
+    public boolean isSlotFood() { return foodKind == FoodKind.SLOT; }
 
     /** The permanent on-board store cell (null until it spawns). Bumping it opens the shop. */
     public Point store() { return store; }
@@ -1145,7 +1167,7 @@ public final class GameState {
 
     // --- test hooks (package-private) ----------------------------------------
 
-    void forceFood(Point p) { this.food = p; }
+    void forceFood(Point p) { this.food = p; this.foodRespawnPending = false; }
 
     void forcePowerUp(Point p, Element e) {
         this.powerUp = p;
@@ -1171,7 +1193,7 @@ public final class GameState {
     void forceBook(Point p) {
         this.food = p;
         this.foodTile = Tile.BOOK;
-        this.foodIsBook = true;
+        this.foodKind = FoodKind.BOOK;
     }
 
     /** Place the store at a cell (tests + debug). */
@@ -1189,9 +1211,6 @@ public final class GameState {
     /** Set how many times the current food will flee (tests). */
     void forceFoodFlees(int n) { this.foodFleesLeft = n; }
 
-    /** Set the current food's tile directly (tests, e.g. to feed 🍖 for the basilisk roll). */
-    void forceFoodTile(Tile t) { this.foodTile = t; }
-
     /** Enter the basilisk state with the cure egg at {@code eggCell} (tests + the {@code --debug} key). */
     void forceBasilisk(Point eggCell) {
         this.basilisk = true;
@@ -1202,30 +1221,25 @@ public final class GameState {
     void forceSlotFood(Point p) {
         this.food = p;
         this.foodTile = Tile.SLOT;
-        this.foodIsSlot = true;
+        this.foodKind = FoodKind.SLOT;
     }
 
     /** Place a 📈 stock on a cell (tests + the {@code --debug} key); eating it adds a portfolio share. */
     void forceStockFood(Point p) {
         this.food = p;
         this.foodTile = Tile.STOCK;
-        this.foodIsStock = true;
-        this.foodIsBook = false; // the special-food flags are mutually exclusive
-        this.foodIsSlot = false;
+        this.foodKind = FoodKind.STOCK; // one kind at a time - exclusivity is structural now
     }
 
     /** Place a 📦 box food on a cell (tests + {@code --debug}); eating it grows AND fires the BOX notice. */
     void forceBoxFood(Point p) {
         this.food = p;
         this.foodTile = Tile.BOX;
-        this.foodIsBox = true;
-        this.foodIsBook = false; // the special-food flags are mutually exclusive
-        this.foodIsSlot = false;
-        this.foodIsStock = false;
+        this.foodKind = FoodKind.BOX;
     }
 
     /** True while the current food is the 📦 box (tests). */
-    boolean isBoxFood() { return foodIsBox; }
+    boolean isBoxFood() { return foodKind == FoodKind.BOX; }
 
     /** Grant portfolio shares directly (tests + the {@code --play} win-path), clamped to the cap. */
     void grantShares(int n) { this.shares = Math.max(0, Math.min(MAX_SHARES, shares + n)); }

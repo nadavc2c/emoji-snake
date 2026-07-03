@@ -160,6 +160,23 @@ class StoreInterludeTest {
     }
 
     @Test
+    void aClosedCheckoutIgnoresFurtherPurchases() {
+        // Regression: key-repeat on 8 (or any digit after choosing an exit) used to keep charging
+        // in the gap before the app's next frame observed isDone() - double-paying for one descent.
+        GameState g = new GameState(20, 20, 5L);
+        g.addScore(100);
+        StoreInterlude shop = shop(g, 0, 0, 0); // floor 0 -> price 25
+        shop.handleKey(KeyCode.DIGIT8);         // buy the descent (closes the shop)
+        int after = g.score();
+
+        shop.handleKey(KeyCode.DIGIT8);         // key-repeat lands after isDone()
+        shop.handleKey(KeyCode.DIGIT3);         // so does a stray power-up buy
+
+        assertEquals(after, g.score(), "a closed checkout must not charge again");
+        assertTrue(shop.boughtSecret(), "the single bought descent still stands");
+    }
+
+    @Test
     void aDirectionKeyLeavesTheShopOnThatHeading() {
         GameState g = new GameState(20, 20, 5L);
         StoreInterlude shop = shop(g, 0, 0, 0);

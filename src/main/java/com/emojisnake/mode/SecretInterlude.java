@@ -1,5 +1,6 @@
 package com.emojisnake.mode;
 
+import com.emojisnake.fx.TextFit;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
@@ -8,8 +9,8 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.text.TextAlignment;
 
 /**
- * Two related "there's a whole game under this one" reveals, both paged on keypress ("press any key to
- * progress") so the lines are readable:
+ * Two related "there's a whole game under this one" reveals, both paged on a play key (see
+ * {@link Interlude#isAdvanceKey}) so the lines are readable:
  * <ul>
  *   <li>the ↓↓↓ gag ({@code new SecretInterlude()}): the original sub-basement / "it was always
  *       billing" bit;</li>
@@ -27,7 +28,7 @@ public final class SecretInterlude implements Interlude {
         new Beat("descending past Legal, past Compliance...",
                 "...past the floors that don't have names, only invoices."),
         new Beat("THE REAL GAME WAS BILLING.",
-                "it always was. press any key - you'll be charged for it."),
+                "it always was. press a key - you'll be charged for it."),
     };
 
     private static final String[] FLOOR_TITLE = {
@@ -100,11 +101,11 @@ public final class SecretInterlude implements Interlude {
         boolean last = beat >= beats.length - 1;
         double maxWidth = w - 40;
 
-        gc.setFont(fit(b.big(), 34, FontWeight.BOLD, maxWidth));
+        gc.setFont(TextFit.fit(b.big(), "Consolas", FontWeight.BOLD, 34, maxWidth));
         gc.setFill(((int) (elapsed * 6)) % 2 == 0 ? Color.web("#7ee081") : Color.web("#7df9ff"));
         gc.fillText(b.big(), w / 2, h / 2 - 28);
 
-        gc.setFont(fit(b.small(), 18, FontWeight.NORMAL, maxWidth));
+        gc.setFont(TextFit.fit(b.small(), "Consolas", FontWeight.NORMAL, 18, maxWidth));
         gc.setFill(Color.web("#9ad29a"));
         gc.fillText(b.small(), w / 2, h / 2 + 14);
 
@@ -122,12 +123,4 @@ public final class SecretInterlude implements Interlude {
         }
     }
 
-    /** Shrink the font until {@code text} fits {@code maxWidth}, so no line ever crops at the edges. */
-    private static Font fit(String text, double base, FontWeight weight, double maxWidth) {
-        Font f = Font.font("Consolas", weight, base);
-        javafx.scene.text.Text probe = new javafx.scene.text.Text(text);
-        probe.setFont(f);
-        double measured = probe.getLayoutBounds().getWidth();
-        return measured > maxWidth ? Font.font("Consolas", weight, base * maxWidth / measured) : f;
-    }
 }

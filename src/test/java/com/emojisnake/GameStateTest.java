@@ -3,6 +3,8 @@ package com.emojisnake;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -156,6 +158,69 @@ class GameStateTest {
             g.tick(); // wrap around, eating nothing -> momentum decays
         }
         assertTrue(g.delayMillis() > fast, "pace should drift back toward calm when not eating");
+    }
+
+    @Test
+    void movingOntoTheTailWhileOwingGrowthIsACrash() {
+        // The tail-cell exemption assumes the tail vacates this tick; a pending slot payout keeps
+        // it in place, so stepping onto it then is a real bite. (placeObstacles keeps rows 9-11
+        // clear, so this 2x2 loop at the centre is guaranteed unobstructed.)
+        GameState g = newGame();                // head (10,10) heading RIGHT, tail (8,10)
+        g.forceFood(new Point(0, 0));           // park food clear of the manoeuvre
+        g.addPendingGrowth(1);                  // grow to length 4 so the loop closes on the tail
+        g.setDirection(Direction.DOWN);
+        g.tick();                               // (10,11); growth consumed, tail kept
+        g.setDirection(Direction.LEFT);
+        g.tick();                               // (9,11); tail is now (9,10)
+        g.setDirection(Direction.UP);           // next = (9,10) == tail
+        g.addPendingGrowth(1);                  // owe growth again: the tail will NOT move this tick
+
+        GameState.Event e = g.tick();
+
+        assertSame(GameState.Event.CRASHED, e, "the tail stays put this tick - biting it is lethal");
+        assertSame(GameState.Status.GAME_OVER, g.status());
+    }
+
+    @Test
+    void movingOntoTheVacatingTailStaysLegal() {
+        // Companion pin: with no growth owed the tail moves out of the way, so chasing it is fine.
+        GameState g = newGame();
+        g.forceFood(new Point(0, 0));
+        g.addPendingGrowth(1);
+        g.setDirection(Direction.DOWN);
+        g.tick();                               // (10,11), length 4
+        g.setDirection(Direction.LEFT);
+        g.tick();                               // (9,11); tail (9,10)
+        g.setDirection(Direction.UP);           // next == tail, but it vacates this tick
+
+        GameState.Event e = g.tick();
+
+        assertSame(GameState.Event.MOVED, e, "chasing your own vacating tail is still legal");
+        assertSame(GameState.Status.RUNNING, g.status());
+    }
+
+    @Test
+    void foodRespawnRetriesWhenBoardWasFull() {
+        GameState g = newGame();                // head (10,10) heading RIGHT
+        Point bite = new Point(11, 10);
+        g.forceFood(bite);
+        java.util.List<Point> body = g.snakeBody();
+        for (int y = 0; y < 20; y++) {          // wall in every cell that isn't the snake or the food
+            for (int x = 0; x < 20; x++) {
+                Point p = new Point(x, y);
+                if (!body.contains(p) && !p.equals(bite)) {
+                    g.addObstacle(p);
+                }
+            }
+        }
+
+        GameState.Event e = g.tick();           // eat: the respawn finds no free cell
+        assertSame(GameState.Event.ATE_FOOD, e);
+        assertNull(g.food(), "a saturated board leaves no cell to respawn on");
+
+        g.clearObstacles();
+        g.tick();                               // the retry lands as soon as space frees up
+        assertNotNull(g.food(), "food must come back once the board has room again");
     }
 
     @Test

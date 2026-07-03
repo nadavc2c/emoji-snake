@@ -111,13 +111,20 @@ public final class AudioEngine {
     /** Stop the thread and release the line. Safe to call once, from {@code Application.stop()}. */
     public void close() {
         running = false;
-        if (thread != null) {
+        Thread t = thread;
+        thread = null;
+        if (t != null) {
             try {
-                thread.join(500);
+                t.join(500);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            thread = null;
+            if (t.isAlive()) {
+                // A wedged audio device can block write() past the join window. The render thread
+                // still owns the line then - closing/nulling it under the thread would NPE. It's a
+                // daemon, so JVM exit reclaims both.
+                return;
+            }
         }
         if (line != null) {
             line.flush();

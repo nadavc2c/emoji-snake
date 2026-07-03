@@ -55,8 +55,4 @@ public final class VnArt {
         }
         return load("/vn/bg/" + background + ".png");
     }
-
-    public Image title() {
-        return load("/vn/title.png");
-    }
 }
