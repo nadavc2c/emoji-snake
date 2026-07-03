@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
  * Logic of the on-board shop against a real headless {@link GameState} (atlas is render-only, so null
  * is fine). Item slots: 1-5 power-ups, 6 VESTED LIFE (persistent +max life), 7 THE BARBER (persistent
  * "haircut"), 8 THE BACK ROOM (descend a floor), 9 the TRUE ENDING (locked until every floor is
- * cleared AND every novel is read).
+ * cleared AND every novel is read - both THIS run; death resets both counts).
  */
 class StoreInterludeTest {
 
@@ -23,9 +23,9 @@ class StoreInterludeTest {
     private static final int NOVELS = 5;
     private static final int MAXTRIM = 3;
 
-    /** Shop at a given per-run floor / banked life bonus / novels-read count (no haircut, not yet ended). */
-    private static StoreInterlude shop(GameState g, int rank, int lifeBonus, int vnDone) {
-        return new StoreInterlude(g, null, 640, 696, rank, FLOORS, lifeBonus, 2, vnDone, NOVELS, 0, MAXTRIM, false);
+    /** Shop at a given per-run floor / banked life bonus / per-run novels-read count (no haircut, not yet ended). */
+    private static StoreInterlude shop(GameState g, int rank, int lifeBonus, int vnRead) {
+        return new StoreInterlude(g, null, 640, 696, rank, FLOORS, lifeBonus, 2, vnRead, NOVELS, 0, MAXTRIM, false);
     }
 
     /** Shop with a given number of BARBER "haircut" levels already banked. */

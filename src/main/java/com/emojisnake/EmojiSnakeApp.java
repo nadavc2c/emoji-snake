@@ -147,7 +147,7 @@ public class EmojiSnakeApp extends Application {
     private int lastScore;            // for funny-score gag crossing detection (67/69/420...)
     private boolean fakeCrashUsedThisRun; // the fake-crash gag fires at most once per run
     private int floorThisRun;         // back-room floors descended THIS run (resets on death; gates the ending)
-    private final java.util.Set<String> vnSeenThisRun = new java.util.HashSet<>(); // no repeat VNs per run
+    private final java.util.Set<String> vnSeenThisRun = new java.util.HashSet<>(); // novels read THIS run (no repeats; with floorThisRun, gates the ending)
     private Stage stage;              // kept for the window-shrink gag
     private boolean shrinking;        // a window-shrink animation is in progress
     private double inputLockoutT;     // brief deafness after a stop, so mashed keys don't carry over
@@ -377,12 +377,11 @@ public class EmojiSnakeApp extends Application {
                 }
             }
         } else if (interlude instanceof VisualNovelInterlude vn) {
-            // Finishing a novel (any ending) marks it read - completing all 5 gates the TRUE ENDING.
-            String novelId = vn.story().id();
-            if (!meta.vnDone().contains(novelId)) {
-                meta = meta.withVnDone(novelId);
-                persist();
-            }
+            // Novels are a PER-RUN collectible (like the floors): pickNovel already counted this one in
+            // vnSeenThisRun - any ending counts, even a BAD END (a run never re-offers a novel, so a wrong
+            // choice must not lock the ending). At 5/5 the books retire for the REST OF THIS RUN only.
+            refreshBooksEnabled();
+            String vnProg = "  [novels " + vnSeenThisRun.size() + "/" + VisualNovels.all().size() + "]";
             // A wrong choice in the novel kills you - spend a life via the same path as the boss
             // (revive() only works from GAME_OVER, so we adjust lives directly here).
             if (vn.died()) {
@@ -392,14 +391,15 @@ public class EmojiSnakeApp extends Application {
                     realGameOver();
                     gameOverTitle = "BAD END";   // a VN death is unmistakable, not a pause
                 } else {
-                    resumeAfterScreen("BAD END - " + lives + (lives == 1 ? " life left" : " lives left"), true);
+                    resumeAfterScreen("BAD END - " + lives + (lives == 1 ? " life left" : " lives left")
+                            + vnProg, true);
                 }
             } else {
                 int reward = vn.reward();
                 if (reward > 0) {
                     game.addScore(reward);
                 }
-                resumeAfterScreen(vn.outcomeBlurb() + (reward > 0 ? "  +" + reward : ""), false);
+                resumeAfterScreen(vn.outcomeBlurb() + (reward > 0 ? "  +" + reward : "") + vnProg, false);
             }
         } else if (interlude instanceof StoreInterlude store) {
             // Apply any permanent +max-life upgrades bought this visit (persisted across runs).
@@ -517,7 +517,7 @@ public class EmojiSnakeApp extends Application {
     /**
      * Pick a novel not seen this run. Returns {@code null} once every novel HAS been seen this run, so a
      * single run NEVER repeats one - a later book just acts as plain food (no VN) instead of re-opening
-     * one. (Books retire across runs at 5/5 anyway, so this only bites a run that reads all 5 in one go.)
+     * one. (Books also retire for the rest of the run at 5/5, so this is just the belt to that suspender.)
      */
     private com.emojisnake.vn.Story pickNovel() {
         if (vnSeenThisRun.size() >= VisualNovels.all().size()) {
@@ -557,7 +557,7 @@ public class EmojiSnakeApp extends Application {
         // and the ending gate both re-earn each run - the back room doesn't carry across a death.
         return new StoreInterlude(game, atlas, WIDTH, HEIGHT,
                 floorThisRun, MAX_FLOORS, meta.maxLifeBonus(), MAX_LIFE_BONUS,
-                meta.vnDone().size(), VisualNovels.all().size(), meta.trim(), MAX_TRIM, meta.ended());
+                vnSeenThisRun.size(), VisualNovels.all().size(), meta.trim(), MAX_TRIM, meta.ended());
     }
 
     private void onKonami() {
@@ -1078,9 +1078,7 @@ public class EmojiSnakeApp extends Application {
         game.setMechanicsEnabled(metaUnlocked);   // power-ups, synergies, portals
         game.setGagsEnabled(metaUnlocked);        // the rare "shed body" gag
         game.setStoreEnabled(metaUnlocked);       // the on-board shop only exists once awake
-        // Books deliver the 5 required novels; once every novel is read they'd only interrupt the long
-        // score-farming runs the deep floors need, so retire them at 5/5.
-        game.setBooksEnabled(metaUnlocked && meta.vnDone().size() < VisualNovels.all().size());
+        refreshBooksEnabled();                    // books deliver the run's 5 required novels
         game.setFleeingFoodEnabled(metaUnlocked); // food bolts when you crowd it
         game.setBasiliskEnabled(metaUnlocked);    // roasted chicken can hatch the cockatrice
         game.setGambleEnabled(metaUnlocked);      // a food can be a 🎰 slot machine
@@ -1091,6 +1089,17 @@ public class EmojiSnakeApp extends Application {
         // your face burn your lives) to push you to the wake-up. Once awake, the chaos does that job.
         game.setGaslightEnabled(!metaUnlocked);
         updateTitle(); // the title hint ("eye-bleed edition") only appears once it's awake
+    }
+
+    /**
+     * Novels are a PER-RUN collectible (with the floors, they gate the TRUE ENDING - death resets both,
+     * so every run starts fresh; only the roguelike bonuses persist). Books drop while this run still has
+     * unread novels; at 5/5 they retire for the REST OF THE RUN so they stop interrupting the long
+     * score-farming stretch, and the next run re-arms them. Called from {@link #applyMetaGameFlags} and
+     * again after each finished novel.
+     */
+    private void refreshBooksEnabled() {
+        game.setBooksEnabled(metaUnlocked && vnSeenThisRun.size() < VisualNovels.all().size());
     }
 
     /** Window title: plain for the pre-wake runs (no "eye-bleed" hint), full once the meta is awake. */
@@ -1941,16 +1950,28 @@ public class EmojiSnakeApp extends Application {
     private void playBookRetire() {
         beginPlay(5L);
         metaUnlocked = true;
-        meta = new SaveStore.Save(0, 0, false);           // no novels read yet
         applyMetaGameFlags();
-        check(game.isBooksEnabled(), "books should still drop while novels remain unread");
-        java.util.Set<String> allVn = new java.util.HashSet<>();
-        for (com.emojisnake.vn.Story s : VisualNovels.all()) {
-            allVn.add(s.id());
+        check(game.isBooksEnabled(), "books should drop while this run still has unread novels");
+        // Seed 4/5 read, then finish the 5th through the REAL book -> VN -> finishInterlude path: the
+        // retirement must land mid-run, not wait for the next applyMetaGameFlags.
+        java.util.List<com.emojisnake.vn.Story> all = VisualNovels.all();
+        for (int n = 0; n < all.size() - 1; n++) {
+            vnSeenThisRun.add(all.get(n).id());
         }
-        meta = new SaveStore.Save(0, 0, false, allVn);    // every novel read -> retire books
+        game.forceBook(ahead());
+        step();
+        check(interlude instanceof VisualNovelInterlude, "the 5th book did not open a visual novel");
+        for (int n = 0; n < 12 && interlude != null && !interlude.isDone(); n++) {
+            interlude.handleKey(KeyCode.SPACE);
+            interlude.handleKey(KeyCode.DIGIT1);
+        }
+        check(interlude != null && interlude.isDone(), "could not walk the 5th novel to an ending");
+        finishInterlude();
+        check(!game.isBooksEnabled(), "books must retire once all 5 novels are read THIS run");
+        // A fresh run re-arms them: the gate is per-run, not persistent.
+        vnSeenThisRun.clear();
         applyMetaGameFlags();
-        check(!game.isBooksEnabled(), "books must retire once all novels are read");
+        check(game.isBooksEnabled(), "a new run must re-arm the books (per-run gate, not persistent)");
     }
 
     private void playStoreExit() {
@@ -2072,26 +2093,26 @@ public class EmojiSnakeApp extends Application {
 
     private void playEndingBlockedUntilNovelsRead() {
         beginPlay(5L);
-        meta = new SaveStore.Save(MAX_FLOORS, 0, false); // NO novels read yet
-        floorThisRun = MAX_FLOORS; // all floors descended THIS run (the gate is now run-local)
+        meta = new SaveStore.Save(0, 0, false);
+        floorThisRun = MAX_FLOORS; // all floors descended THIS run - but NO novels read THIS run
         game.addScore(400);
         game.forceStore(ahead());
         step();
         check(interlude instanceof StoreInterlude, "store did not open");
         interlude.handleKey(KeyCode.DIGIT9); // try to buy the ending
-        check(!((StoreInterlude) interlude).boughtEnding(), "the ending must stay locked until all 5 novels are read");
+        check(!((StoreInterlude) interlude).boughtEnding(),
+                "the ending must stay locked until all 5 novels are read THIS run");
         check(game.score() == 400, "the locked ending must not charge");
     }
 
     private void playEnding() {
         beginPlay(5L);
-        // every floor cleared AND every novel read -> the ending is unlocked
-        java.util.Set<String> allVn = new java.util.HashSet<>();
+        // every floor cleared AND every novel read THIS RUN -> the ending is unlocked (both run-local)
+        meta = new SaveStore.Save(0, 0, false);
         for (com.emojisnake.vn.Story s : VisualNovels.all()) {
-            allVn.add(s.id());
+            vnSeenThisRun.add(s.id());
         }
-        meta = new SaveStore.Save(MAX_FLOORS, 0, false, allVn);
-        floorThisRun = MAX_FLOORS; // all floors descended THIS run (the ending gate is run-local now)
+        floorThisRun = MAX_FLOORS;
         game.addScore(400);
         game.forceStore(ahead());
         step();

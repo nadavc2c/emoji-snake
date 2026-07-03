@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,13 +15,12 @@ class SaveStoreTest {
     @Test
     void roundTripsEveryFieldIncludingTrim(@TempDir Path dir) {
         SaveStore store = new SaveStore(dir.resolve("save.dat"));
-        store.save(new SaveStore.Save(3, 2, true, Set.of("a", "b"), 420, 7, 3));
+        store.save(new SaveStore.Save(3, 2, true, 420, 7, 3));
 
         SaveStore.Save back = store.load();
         assertEquals(3, back.rank());
         assertEquals(2, back.maxLifeBonus());
         assertTrue(back.ended());
-        assertEquals(Set.of("a", "b"), back.vnDone());
         assertEquals(420, back.highScore());
         assertEquals(7, back.gamesPlayed());
         assertEquals(3, back.trim(), "the banked haircut level must survive a save/load");
@@ -38,7 +36,7 @@ class SaveStoreTest {
     @Test
     void theSavedFileIsOpaqueOnDisk(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("save.dat");
-        new SaveStore(file).save(new SaveStore.Save(1, 1, false, Set.of(), 999, 3, 2));
+        new SaveStore(file).save(new SaveStore.Save(1, 1, false, 999, 3, 2));
         String raw = Files.readString(file);
         assertFalse(raw.contains("999"), "the high score must not be readable in the file");
         assertFalse(raw.contains("trim"), "the field keys must not be readable in the file");
@@ -49,14 +47,14 @@ class SaveStoreTest {
     @Test
     void aSaveFromAnotherVersionLoadsUnknownKeysIgnoredMissingDefaulted(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("save.dat");
-        // A save written by a different version: carries an unknown future key AND has no trim field.
+        // A save written by a different version: carries an unknown future key, the retired legacy
+        // "vn" key (novels are per-run now), AND has no trim field.
         String content = "high=500\ngames=4\nrank=2\nmaxlife=1\nended=true\nvn=a,b\nfuture=42\n";
         Files.writeString(file, SaveCodec.encode(content)); // verbatim-copy: the digest stays valid
         SaveStore.Save back = new SaveStore(file).load();
         assertEquals(500, back.highScore());
         assertEquals(2, back.rank());
         assertTrue(back.ended());
-        assertEquals(Set.of("a", "b"), back.vnDone());
         assertEquals(0, back.trim(), "a missing field defaults; everything known still survives");
     }
 

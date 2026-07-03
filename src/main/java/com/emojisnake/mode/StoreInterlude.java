@@ -60,13 +60,13 @@ public final class StoreInterlude implements Interlude {
 
     private final GameState game;
     private final EmojiAtlas atlas;
-    private final int rank;          // floors already descended (persistent)
+    private final int rank;          // floors descended THIS run (resets on death)
     private final int maxFloors;
     private final int lifeBonus;     // +max-life upgrades already banked (persistent)
     private final int maxLifeBonus;
     private final int trim;          // BARBER "haircut" levels already banked (persistent)
     private final int maxTrim;
-    private final int vnDone;        // novels finished (persistent)
+    private final int vnRead;        // novels read THIS run (resets on death - the ending gate, like floors)
     private final int vnTotal;
     private final boolean alreadyEnded; // the TRUE ENDING has already been beaten (persistent)
 
@@ -81,7 +81,7 @@ public final class StoreInterlude implements Interlude {
 
     public StoreInterlude(GameState game, EmojiAtlas atlas, double width, double height,
                           int rank, int maxFloors, int lifeBonus, int maxLifeBonus,
-                          int vnDone, int vnTotal, int trim, int maxTrim, boolean alreadyEnded) {
+                          int vnRead, int vnTotal, int trim, int maxTrim, boolean alreadyEnded) {
         this.game = game;
         this.atlas = atlas;
         this.rank = rank;
@@ -90,7 +90,7 @@ public final class StoreInterlude implements Interlude {
         this.maxLifeBonus = maxLifeBonus;
         this.trim = trim;
         this.maxTrim = maxTrim;
-        this.vnDone = vnDone;
+        this.vnRead = vnRead;
         this.vnTotal = vnTotal;
         this.alreadyEnded = alreadyEnded;
     }
@@ -136,7 +136,7 @@ public final class StoreInterlude implements Interlude {
     }
 
     private boolean novelsRead() {
-        return vnDone >= vnTotal;
+        return vnRead >= vnTotal;
     }
 
     private boolean endingUnlocked() {
@@ -262,7 +262,7 @@ public final class StoreInterlude implements Interlude {
         if (!endingUnlocked()) {
             flash(!floorsCleared()
                     ? "the TRUE ENDING is for closers. clear all " + maxFloors + " floors first."
-                    : "first read all " + vnTotal + " novels. you've finished " + vnDone + ".");
+                    : "read all " + vnTotal + " novels this run. you're at " + vnRead + ". dying resets the syllabus.");
             return;
         }
         if (game.score() < ENDING_PRICE) {
@@ -292,6 +292,7 @@ public final class StoreInterlude implements Interlude {
         gc.setTextAlign(TextAlignment.CENTER);
         gc.setFill(Color.web("#7ee081"));
         String hdr = "score: " + game.score() + "      Floor " + rank + "/" + maxFloors
+                + "      novels " + vnRead + "/" + vnTotal
                 + (endingUnlocked() ? "  -  the way out is open" : "");
         gc.setFont(TextFit.fit(hdr, "Segoe UI", FontWeight.BOLD, 16, w - 40));
         gc.fillText(hdr, w / 2, 66);
@@ -327,7 +328,7 @@ public final class StoreInterlude implements Interlude {
         String endLabel = alreadyEnded ? "★ THE FIRM IS YOURS ★  (already ascended)"
                 : endingUnlocked() ? "★ BECOME THE FIRM ★  (TRUE ENDING)"
                 : !floorsCleared() ? "★ TRUE ENDING ★  (clear all floors first)"
-                : "★ TRUE ENDING ★  (read all novels: " + vnDone + "/" + vnTotal + ")";
+                : "★ TRUE ENDING ★  (novels this run: " + vnRead + "/" + vnTotal + ")";
         row(gc, w, y, rowH, 9, endLabel,
                 alreadyEnded ? "-" : endingUnlocked() ? ENDING_PRICE + " pts" : "???", Tile.BOSS, canEnd, "#1c1024");
 
