@@ -113,7 +113,7 @@ public final class GameState {
     // tests draw zero extra RNG and score exactly as before. Fractional gains are carried in scoreCarry.
     private static final double STOCK_CHANCE = 0.08;      // fraction of food respawns that become a 📈 (steadier)
     private static final double STOCK_YIELD = 0.15;       // +15% score per share held
-    private static final int MAX_SHARES = 12;             // cap the portfolio (=> up to 2.8x before a crash)
+    private static final int BASE_MAX_SHARES = 12;        // default portfolio cap (=> up to 2.8x before a crash)
     // Crashes are gentler now (they were wiping fresh portfolios too fast): a small portfolio is safe,
     // and the per-tick, per-share odds are ~halved so shares last long enough to feel like a rally.
     private static final int STOCK_CRASH_MIN_SHARES = 3;   // no margin call until the portfolio is real
@@ -146,6 +146,8 @@ public final class GameState {
     private boolean stocksEnabled;  // a food can be a 📈 stock; eating it compounds score; app opts in
     private boolean boxEnabled;     // a food can be a 📦; eating it triggers the window-shrink; app opts in
     private int shares;             // per-run portfolio size; score multiplier = 1 + shares*STOCK_YIELD
+    private int maxShares = BASE_MAX_SHARES; // portfolio ceiling; the app raises it via unlocked achievements
+    private int shareFloor;         // crash-proof minimum shares (an achievement reward); 0 = off (vanilla)
     private double scoreCarry;      // fractional score not yet realized (so +15%/share is smooth)
     private int pendingGrowth;      // length still owed (from a slot win), grown one segment per tick
     private int trimPerLevel;       // "haircut": tail segments auto-shed each level-up (0 = off); app opts in
@@ -311,6 +313,12 @@ public final class GameState {
 
     /** Current 📈 portfolio size (shares held this run). */
     public int shares() { return shares; }
+
+    /** Raise the portfolio ceiling (achievement "milk"). Defaults to {@value #BASE_MAX_SHARES}. */
+    public void setMaxShares(int n) { this.maxShares = Math.max(1, n); }
+
+    /** A crash-proof minimum portfolio a MARGIN CALL can't drop below (achievement reward). 0 = off. */
+    public void setShareFloor(int n) { this.shareFloor = Math.max(0, n); }
 
     /**
      * Add an earned reward (food / bonus gem), scaled by GOLD and the 📈 stock multiplier, carrying the
@@ -486,7 +494,7 @@ public final class GameState {
             if (ateStock) {
                 // Buy a share: the multiplier this bite used the OLD portfolio; the new share compounds
                 // every future earning this run. The market can later crash it (maybeCrash()).
-                shares = Math.min(MAX_SHARES, shares + 1);
+                shares = Math.min(maxShares, shares + 1);
                 notices.add(new Notice(Notice.Kind.STOCK, null));
             }
             if (ateBook) {
@@ -879,9 +887,11 @@ public final class GameState {
         }
     }
 
-    /** Apply one market correction: halve the portfolio and surface a CRASH notice. */
+    /** Apply one market correction: halve the portfolio (never below the crash-proof floor) + CRASH notice. */
     private void crash() {
-        shares /= 2; // the correction wipes half the portfolio
+        // Wipe half, but not below the vested floor - and a crash must never GROW the portfolio (if you're
+        // somehow already under the floor, e.g. a mid-run floor upgrade, the correction just holds).
+        shares = Math.min(shares, Math.max(shareFloor, shares / 2));
         notices.add(new Notice(Notice.Kind.CRASH, null));
     }
 
@@ -1242,7 +1252,7 @@ public final class GameState {
     boolean isBoxFood() { return foodKind == FoodKind.BOX; }
 
     /** Grant portfolio shares directly (tests + the {@code --play} win-path), clamped to the cap. */
-    void grantShares(int n) { this.shares = Math.max(0, Math.min(MAX_SHARES, shares + n)); }
+    void grantShares(int n) { this.shares = Math.max(0, Math.min(maxShares, shares + n)); }
 
     /** Crash the market now, ignoring the rarity roll (tests): halve the portfolio, fire CRASH. */
     void forceCrash() {

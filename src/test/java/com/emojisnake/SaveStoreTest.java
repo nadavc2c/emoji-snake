@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,6 +32,34 @@ class SaveStoreTest {
         SaveStore.Save fresh = new SaveStore(dir.resolve("save.dat")).load();
         assertEquals(0, fresh.trim(), "a fresh player has no haircut banked");
         assertEquals(0, fresh.rank());
+        assertTrue(fresh.achievements().isEmpty(), "a fresh player has unlocked nothing");
+    }
+
+    @Test
+    void roundTripsUnlockedAchievements(@TempDir Path dir) {
+        SaveStore store = new SaveStore(dir.resolve("save.dat"));
+        store.save(new SaveStore.Save(0, 0, false, 0, 0, 0, Set.of("margin_call", "employee_one")));
+        SaveStore.Save back = store.load();
+        assertTrue(back.achievements().contains("margin_call"));
+        assertTrue(back.achievements().contains("employee_one"));
+        assertEquals(2, back.achievements().size());
+    }
+
+    @Test
+    void anOldSaveWithoutTheAchKeyLoadsAsEmptyNotNull(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("save.dat");
+        String content = "high=100\ngames=3\nrank=1\nmaxlife=0\nended=false\ntrim=0\n"; // no ach= key
+        Files.writeString(file, SaveCodec.encode(content));
+        SaveStore.Save back = new SaveStore(file).load();
+        assertTrue(back.achievements().isEmpty(), "a save with no ach= key yields an empty set, not null");
+        assertEquals(100, back.highScore());
+    }
+
+    @Test
+    void anEmptyAchievementSetRoundTrips(@TempDir Path dir) {
+        SaveStore store = new SaveStore(dir.resolve("save.dat"));
+        store.save(new SaveStore.Save(0, 0, false, 0, 0, 0, Set.of()));
+        assertTrue(store.load().achievements().isEmpty(), "no unlocks survives as an empty set");
     }
 
     @Test

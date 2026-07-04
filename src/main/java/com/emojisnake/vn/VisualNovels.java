@@ -27,6 +27,10 @@ public final class VisualNovels {
     private static final int MID = 10;     // effective but messy / second-best
     private static final int MEEK = 1;     // survived, kept your decency-ish, earned almost nothing
 
+    /** Id of the hidden "chicken" novel ({@link #hidden()}) - kept OUT of {@link #all()} so it never
+     *  counts toward the 5/5 ending gate. Opened only by eating a 📖 while in basilisk/chicken mode. */
+    public static final String HIDDEN_ID = "founder";
+
     private VisualNovels() {
     }
 
@@ -38,6 +42,47 @@ public final class VisualNovels {
     public static Story pick(Random rng) {
         List<Story> a = all();
         return a.get(rng.nextInt(a.size()));
+    }
+
+    /**
+     * The hidden "chicken" novel - a rare, <b>choice-less, linear</b> bonus VN opened by eating a 📖 while
+     * transformed into the 🐔 basilisk (a 🐍 "meal" that was secretly the firm's founding file - readable
+     * only by the cursed). It is deliberately kept OUT of {@link #all()}: it never counts toward the 5/5
+     * ending gate, never repeats-guards the run, and pays no score ({@code end(..., 0, ...)}). Its beats
+     * chain with a single "▸" continue choice (paging, not a decision), ending in one safe {@code .end}.
+     * The app unlocks the {@code employee_one} achievement when it finishes.
+     */
+    public static Story hidden() {
+        return Story.builder(HIDDEN_ID, "[ THE FOUNDING FILE ]", "intro")
+                .node("intro", "", "", "neutral", "archive",
+                        "You are not supposed to be able to read this. Chickens can't read. But the "
+                                + "basilisk's eyes - your new eyes - see the words squirming under the ink, and "
+                                + "the file opens itself to you like a throat.",
+                        c("▸", "hire"))
+                .node("hire", "Employee One", "founder", "neutral", "archive",
+                        "I was the first hire. Employee One. Loyal as a fresh knife. I believed the mission "
+                                + "statement so hard I highlighted it. Twice.",
+                        c("▸", "bill"))
+                .node("bill", "Employee One", "founder", "neutral", "archive",
+                        "They billed me for my onboarding. Then for my chair. Then for the air I metabolised "
+                                + "at my desk. When the invoice outgrew my net worth, they 'restructured my "
+                                + "assets.' Jaws first. It was, they noted, fully deductible.",
+                        c("▸", "curse"))
+                .node("curse", "Employee One", "founder", "neutral", "archive",
+                        "My last honest thought hardened into a clause. Now everyone the firm digests comes "
+                                + "back like this - a starving basilisk who can read nothing but this one file. "
+                                + "The founding contract. Signed, notarised, and countersigned in enzymes.",
+                        c("▸", "recognise"))
+                .node("recognise", "", "", "neutral", "archive",
+                        "You know this conference room. You have had this beak before. The feathers, the "
+                                + "billing, the fear - all of it fits like an old suit. You are the newest knot "
+                                + "in his lineage. You are Employee One. Again.",
+                        c("▸", "close"))
+                .end("close", 0, "", "", "neutral", "archive",
+                        "The motto settles back down into the ink, patient as sediment: 'Everything is "
+                                + "billable. Even grief. Especially grief.' You blink. A chicken in an office; a "
+                                + "snake-shaped meal cooling on the desk. You'll find the 🥚. You always do. (BAWK.)")
+                .build();
     }
 
     /** Pick a novel whose id isn't in {@code excludeIds} (so a run doesn't repeat one); if all are

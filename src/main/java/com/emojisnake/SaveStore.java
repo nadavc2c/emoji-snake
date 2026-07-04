@@ -5,6 +5,10 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * The single save file. Everything persistent lives in ONE working-directory file, {@code save.dat}
@@ -16,25 +20,39 @@ import java.nio.file.StandardCopyOption;
  *   <li>{@code rank} - back-room floors descended (roguelite meta-progression);</li>
  *   <li>{@code maxLifeBonus} - permanent +max-life upgrades banked;</li>
  *   <li>{@code ended} - reached the true ending;</li>
- *   <li>{@code trim} - banked BARBER "haircut" levels (persistent survival upgrade).</li>
+ *   <li>{@code trim} - banked BARBER "haircut" levels (persistent survival upgrade);</li>
+ *   <li>{@code achievements} - unlocked achievement ids (each raises the 📈 stock ceiling + floor).</li>
  * </ul>
  * On first load it migrates (and removes) the old split files {@code highscore.txt}/{@code progress.txt}/
  * {@code meta.txt} if present. Fails silent on I/O errors.
  */
 public final class SaveStore {
 
-    /** Immutable snapshot of all persisted state. {@code trim} = banked BARBER "haircut" levels. */
+    /**
+     * Immutable snapshot of all persisted state. {@code trim} = banked BARBER "haircut" levels;
+     * {@code achievements} = the ids of unlocked cookie-clicker achievements (they raise the 📈 stock
+     * ceiling + crash-proof floor). The set is defensively copied and kept unmodifiable + insertion-ordered
+     * so the serialized {@code ach=} line is stable.
+     */
     public record Save(int rank, int maxLifeBonus, boolean ended,
-                       int highScore, int gamesPlayed, int trim) {
-        public Save(int rank, int maxLifeBonus, boolean ended) {
-            this(rank, maxLifeBonus, ended, 0, 0, 0);
+                       int highScore, int gamesPlayed, int trim, Set<String> achievements) {
+        public Save {
+            achievements = achievements == null ? Set.of()
+                    : Collections.unmodifiableSet(new LinkedHashSet<>(achievements));
         }
-        public Save withRank(int r) { return new Save(r, maxLifeBonus, ended, highScore, gamesPlayed, trim); }
-        public Save withMaxLifeBonus(int b) { return new Save(rank, b, ended, highScore, gamesPlayed, trim); }
-        public Save withEnded(boolean e) { return new Save(rank, maxLifeBonus, e, highScore, gamesPlayed, trim); }
-        public Save withHighScore(int h) { return new Save(rank, maxLifeBonus, ended, h, gamesPlayed, trim); }
-        public Save withGamesPlayed(int g) { return new Save(rank, maxLifeBonus, ended, highScore, g, trim); }
-        public Save withTrim(int t) { return new Save(rank, maxLifeBonus, ended, highScore, gamesPlayed, t); }
+        public Save(int rank, int maxLifeBonus, boolean ended) {
+            this(rank, maxLifeBonus, ended, 0, 0, 0, Set.of());
+        }
+        public Save(int rank, int maxLifeBonus, boolean ended, int highScore, int gamesPlayed, int trim) {
+            this(rank, maxLifeBonus, ended, highScore, gamesPlayed, trim, Set.of());
+        }
+        public Save withRank(int r) { return new Save(r, maxLifeBonus, ended, highScore, gamesPlayed, trim, achievements); }
+        public Save withMaxLifeBonus(int b) { return new Save(rank, b, ended, highScore, gamesPlayed, trim, achievements); }
+        public Save withEnded(boolean e) { return new Save(rank, maxLifeBonus, e, highScore, gamesPlayed, trim, achievements); }
+        public Save withHighScore(int h) { return new Save(rank, maxLifeBonus, ended, h, gamesPlayed, trim, achievements); }
+        public Save withGamesPlayed(int g) { return new Save(rank, maxLifeBonus, ended, highScore, g, trim, achievements); }
+        public Save withTrim(int t) { return new Save(rank, maxLifeBonus, ended, highScore, gamesPlayed, t, achievements); }
+        public Save withAchievements(Set<String> a) { return new Save(rank, maxLifeBonus, ended, highScore, gamesPlayed, trim, a); }
     }
 
     private final Path file;
@@ -68,7 +86,8 @@ public final class SaveStore {
         String encoded = SaveCodec.encode(
                 "high=" + s.highScore() + "\ngames=" + s.gamesPlayed()
                 + "\nrank=" + s.rank() + "\nmaxlife=" + s.maxLifeBonus()
-                + "\nended=" + s.ended() + "\ntrim=" + s.trim() + "\n");
+                + "\nended=" + s.ended() + "\ntrim=" + s.trim()
+                + "\nach=" + String.join(",", s.achievements()) + "\n");
         try {
             // Write-then-move so a mid-write kill can't truncate the only copy of the save.
             Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
@@ -96,6 +115,7 @@ public final class SaveStore {
         int bonus = 0;
         int trim = 0;
         boolean ended = false;
+        Set<String> ach = new LinkedHashSet<>();
         for (String line : content.split("\n")) {
             int eq = line.indexOf('=');
             if (eq < 0) {
@@ -114,6 +134,14 @@ public final class SaveStore {
                     case "maxlife" -> bonus = Integer.parseInt(val);
                     case "trim" -> trim = Integer.parseInt(val);
                     case "ended" -> ended = Boolean.parseBoolean(val);
+                    case "ach" -> {
+                        // Comma-separated unlocked achievement ids. Empty value = none unlocked yet.
+                        for (String id : val.split(",")) {
+                            if (!id.isBlank()) {
+                                ach.add(id.trim());
+                            }
+                        }
+                    }
                     // "vn" (novels read) was persisted by older versions; novels are per-run now, so it
                     // falls through to the ignore below and an old save still loads cleanly.
                     default -> { /* ignore unknown/legacy keys (compatible with other-version saves) */ }
@@ -122,7 +150,7 @@ public final class SaveStore {
                 // malformed value from another version -> drop this key, keep the rest
             }
         }
-        return new Save(rank, bonus, ended, high, games, trim);
+        return new Save(rank, bonus, ended, high, games, trim, ach);
     }
 
     /** Fold the pre-consolidation split files into one save.dat, then remove them. */

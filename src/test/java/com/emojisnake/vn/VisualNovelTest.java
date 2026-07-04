@@ -132,6 +132,36 @@ class VisualNovelTest {
         assertTrue(VisualNovels.all().stream().anyMatch(s -> s.id().equals(a.id())));
     }
 
+    @Test
+    void theHiddenChickenNovelIsLinearSafeAndOutsideAll() {
+        Story hidden = VisualNovels.hidden();
+        assertTrue(VisualNovels.HIDDEN_ID.equals(hidden.id()));
+        assertFalse(VisualNovels.all().stream().anyMatch(s -> s.id().equals(hidden.id())),
+                "the hidden novel must NOT be in all() - it would pollute the 5/5 ending gate");
+        int endings = 0;
+        for (String id : reachable(hidden)) {
+            StoryNode n = hidden.node(id);
+            if (n.isEnding()) {
+                endings++;
+                assertFalse(n.lethal(), "the bonus VN must never cost a life");
+                assertTrue(n.reward() == 0, "the bonus VN pays no score (not counted toward winning)");
+            } else {
+                assertTrue(n.choices().size() == 1, "a linear beat has exactly one continue choice");
+            }
+        }
+        assertTrue(endings == 1, "the hidden novel has exactly one ending");
+    }
+
+    @Test
+    void walkingTheHiddenNovelReachesASafeEnding() {
+        StoryState st = new StoryState(VisualNovels.hidden());
+        for (int i = 0; i < 20 && !st.ended(); i++) {
+            st.choose(0);
+        }
+        assertTrue(st.ended(), "the linear hidden novel must terminate");
+        assertFalse(st.died(), "its ending is safe");
+    }
+
     /** BFS the reachable node-id set from the story's start. */
     private static Set<String> reachable(Story s) {
         Set<String> seen = new HashSet<>();

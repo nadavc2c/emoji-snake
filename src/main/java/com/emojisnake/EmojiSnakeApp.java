@@ -10,6 +10,8 @@ import com.emojisnake.fx.ParticleSystem;
 import com.emojisnake.fx.RenderLayers;
 import com.emojisnake.fx.TextFit;
 import com.emojisnake.fx.Tween;
+import com.emojisnake.mode.AchievementsInterlude;
+import com.emojisnake.mode.BuchmannBossInterlude;
 import com.emojisnake.mode.DodgeBossInterlude;
 import com.emojisnake.mode.FakeCrashInterlude;
 import com.emojisnake.mode.Interlude;
@@ -149,6 +151,8 @@ public class EmojiSnakeApp extends Application {
     private boolean fakeCrashUsedThisRun; // the fake-crash gag fires at most once per run
     private int floorThisRun;         // back-room floors descended THIS run (resets on death; gates the ending)
     private final java.util.Set<String> vnSeenThisRun = new java.util.HashSet<>(); // novels read THIS run (no repeats; with floorThisRun, gates the ending)
+    private final java.util.Set<String> vnBadEndThisRun = new java.util.HashSet<>(); // novels that got a lethal BAD END this run (the_whole_tragedy achievement)
+    private int bossIndex;            // alternates the two bosses (dodge / Buchmann) each time one fires
     private Stage stage;              // kept for the window-shrink gag
     private boolean shrinking;        // a window-shrink animation is in progress
     private javafx.scene.transform.Scale boardScale; // uniform fit-scale on layers.root() (maximize/resize)
@@ -379,7 +383,10 @@ public class EmojiSnakeApp extends Application {
             return; // don't clobber an interlude a notice already opened this frame (slot/book/store)
         }
         if (level % BOSS_EVERY_LEVELS == 0) {
-            interlude = new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives);
+            // Alternate the two genre-shift bosses: the bullet-hell dodge and the Buchmann Pac-Man maze.
+            interlude = (bossIndex++ % 2 == 0)
+                    ? new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives)
+                    : new BuchmannBossInterlude(atlas, WIDTH, HEIGHT, lives);
         } else if (!fakeCrashUsedThisRun && rng.nextDouble() < FAKECRASH_CHANCE) {
             fakeCrashUsedThisRun = true; // at most one fake crash per run - it loses its bite if repeated
             sound.crash();               // a harsh jolt as the fake fatal-error takes over the screen
@@ -391,6 +398,12 @@ public class EmojiSnakeApp extends Application {
         Interlude done = interlude;
         if (done instanceof DodgeBossInterlude boss) {
             finishBoss(boss);
+        } else if (done instanceof BuchmannBossInterlude bm) {
+            finishBuchmann(bm);
+        } else if (done instanceof AchievementsInterlude) {
+            // A non-destructive viewer: do NOTHING here - don't touch started / mercyMsg / resumeIsRevive,
+            // so closing it resumes EXACTLY the prior state (a mid-run pause, a revive prompt, PAUSED, or
+            // GAME_OVER) and never eats a pending revive line. The teardown below just clears the interlude.
         } else if (done instanceof VisualNovelInterlude vn) {
             finishNovel(vn);
         } else if (done instanceof StoreInterlude store) {
@@ -423,6 +436,7 @@ public class EmojiSnakeApp extends Application {
             // Flawless dodge: a clear, earned reward.
             game.addScore(25);
             game.applyStatus(StatusKind.GHOST, 60);
+            unlock("untouchable");
             resumeAfterScreen("boss dodged flawlessly! +25 & a ghost.", false);
         } else {
             // It bit you: SAY what it cost (the resume prompt shows your remaining lives below). Then
@@ -439,15 +453,60 @@ public class EmojiSnakeApp extends Application {
         }
     }
 
+    /** The Buchmann (Pac-Man) boss: clearing the maze "graduates" you (bonus); a catch costs a life. */
+    private void finishBuchmann(BuchmannBossInterlude boss) {
+        int hits = boss.hits();
+        lives = Math.max(0, lives - hits); // every catch costs a life
+        if (lives <= 0) {
+            game.forceGameOver();
+            realGameOver();
+        } else if (boss.cleared()) {
+            // Graduated the faculty (ate every credit): the flawless reward.
+            game.addScore(40);
+            game.applyStatus(StatusKind.GHOST, 60);
+            unlock("buchmann_grad");
+            resumeAfterScreen("you cleared the faculty! GRADUATED. +40 & a ghost.", false);
+        } else if (hits == 0) {
+            // Ran out the clock untouched (didn't finish the syllabus, but survived).
+            game.addScore(20);
+            resumeAfterScreen("you survived Buchmann. +20.", false);
+        } else {
+            boolean mercy = lives < maxLives() && rng.nextDouble() < BOSS_MERCY_CHANCE;
+            if (mercy) {
+                lives = Math.min(maxLives(), lives + 1);
+                resumeAfterScreen("a partner caught you " + hits + "x... but tenure spat one back (+1).", true);
+            } else {
+                resumeAfterScreen("the partners caught you " + hits + "x. -" + hits
+                        + (hits == 1 ? " life." : " lives."), true);
+            }
+        }
+    }
+
     private void finishNovel(VisualNovelInterlude vn) {
         // Novels are a PER-RUN collectible (like the floors): pickNovel already counted this one in
         // vnSeenThisRun - any ending counts, even a BAD END (a run never re-offers a novel, so a wrong
         // choice must not lock the ending). At 5/5 the books retire for the REST OF THIS RUN only.
+        // The hidden "chicken" file (Employee One): a bonus VN that never counts toward the 5/5 gate,
+        // costs no life (a safe ending), and unlocks its easter-egg achievement. Handled first so it
+        // bypasses the novel-count / bad-end bookkeeping entirely.
+        if (VisualNovels.HIDDEN_ID.equals(vn.story().id())) {
+            unlock("employee_one");
+            refreshBooksEnabled(); // stays armed while you're still a chicken (farmable)
+            resumeAfterScreen("the file closes. you'll find the 🥚. you always do.", false);
+            return;
+        }
         refreshBooksEnabled();
         String vnProg = "  [novels " + vnSeenThisRun.size() + "/" + VisualNovels.all().size() + "]";
+        if (vnSeenThisRun.size() >= VisualNovels.all().size()) {
+            unlock("well_read"); // read every file in a single run (any ending counts)
+        }
         // A wrong choice in the novel kills you - spend a life via the same path as the boss
         // (revive() only works from GAME_OVER, so we adjust lives directly here).
         if (vn.died()) {
+            vnBadEndThisRun.add(vn.story().id());
+            if (vnBadEndThisRun.size() >= VisualNovels.all().size()) {
+                unlock("the_whole_tragedy"); // a lethal BAD END in ALL 5 novels, in one (heavily-lived) run
+            }
             lives = Math.max(0, lives - 1);
             if (lives <= 0) {
                 game.forceGameOver();
@@ -472,12 +531,14 @@ public class EmojiSnakeApp extends Application {
             meta = meta.withMaxLifeBonus(Math.min(MAX_LIFE_BONUS, meta.maxLifeBonus() + store.livesBought()));
             persist();
             lives = Math.min(maxLives(), lives + store.livesBought());
+            unlock("vested");
         }
         // Apply any BARBER "haircut" levels bought this visit (persistent; takes effect immediately).
         if (store.trimBought() > 0) {
             meta = meta.withTrim(Math.min(MAX_TRIM, meta.trim() + store.trimBought()));
             persist();
             game.setTrimPerLevel(meta.trim());
+            unlock("fresh_cut");
         }
         if (store.boughtEnding()) {
             meta = meta.withEnded(true); // cleared every floor + bought the way out
@@ -491,6 +552,9 @@ public class EmojiSnakeApp extends Application {
             // NOT the ending gate. The gate is floorThisRun, which resets on death (re-descend).
             meta = meta.withRank(Math.max(meta.rank(), floorThisRun));
             persist();
+            if (floorThisRun >= MAX_FLOORS) {
+                unlock("sub_basement");
+            }
             Direction safe = safeStoreExit(); // pre-set a safe heading so the post-chapter prompt
             if (safe != null) {               // can't resume back into the wedged-against shop
                 game.setInitialDirection(safe);
@@ -514,6 +578,7 @@ public class EmojiSnakeApp extends Application {
     private void finishEnding() {
         // You won - but the firm never closes. Keep the run alive so you can keep grinding; the win
         // is already saved (meta.ended). The head is wedged against the shop, so pick a safe heading.
+        unlock("become_firm");
         Direction safe = safeStoreExit();
         if (safe != null) {
             game.setInitialDirection(safe);
@@ -525,6 +590,9 @@ public class EmojiSnakeApp extends Application {
         game.addPendingGrowth(slot.amount());
         if (slot.exitDirection() != null) {
             game.setInitialDirection(slot.exitDirection());
+        }
+        if (slot.amount() >= 5) {
+            unlock("jackpot");
         }
         resumeAfterScreen((slot.amount() >= 5 ? "JACKPOT! +" : "+") + slot.amount() + " length", false);
     }
@@ -576,6 +644,34 @@ public class EmojiSnakeApp extends Application {
     }
 
     /**
+     * Unlock an achievement (idempotent): bank it in the save and immediately apply its 📈 stock reward
+     * (raised ceiling + crash-proof floor). Announced with a clear toast so the cookie-clicker payoff reads.
+     */
+    private void unlock(String id) {
+        if (meta.achievements().contains(id)) {
+            return;
+        }
+        java.util.Set<String> next = new java.util.LinkedHashSet<>(meta.achievements());
+        next.add(id);
+        meta = meta.withAchievements(next);
+        persist();
+        applyStockCaps();
+        Achievements.Achievement a = Achievements.byId(id);
+        toast("★ ACHIEVEMENT - " + (a != null ? a.title() : id)
+                + "   [" + meta.achievements().size() + "/" + Achievements.count() + "]", TOAST_LONG);
+    }
+
+    /**
+     * Derive the 📈 portfolio ceiling + crash-proof floor from the unlocked achievements (the cookie-clicker
+     * "milk"). Vanilla (base cap / no floor) until the meta layer is awake, so the pre-wake runs stay plain.
+     */
+    private void applyStockCaps() {
+        int n = Achievements.countUnlocked(meta.achievements()); // catalog-known only (cross-version safe)
+        game.setMaxShares(metaUnlocked ? Achievements.capFor(n) : Achievements.BASE_MAX_SHARES);
+        game.setShareFloor(metaUnlocked ? Achievements.floorFor(n) : 0);
+    }
+
+    /**
      * Pick a novel not seen this run. Returns {@code null} once every novel HAS been seen this run, so a
      * single run NEVER repeats one - a later book just acts as plain food (no VN) instead of re-opening
      * one. (Books also retire for the rest of the run at 5/5, so this is just the belt to that suspender.)
@@ -591,8 +687,11 @@ public class EmojiSnakeApp extends Application {
 
     /** Which classical music bed fits the active takeover screen. */
     private static MusicScene sceneFor(Interlude il) {
-        if (il instanceof DodgeBossInterlude) {
+        if (il instanceof DodgeBossInterlude || il instanceof BuchmannBossInterlude) {
             return MusicScene.BOSS;
+        }
+        if (il instanceof AchievementsInterlude) {
+            return MusicScene.NORMAL; // a quiet viewer - keep the ambient groove
         }
         if (il instanceof VisualNovelInterlude) {
             return MusicScene.VN;
@@ -627,6 +726,7 @@ public class EmojiSnakeApp extends Application {
         applyMetaGameFlags(); // wake the gags mid-run too, not just the visuals
         lives = Math.min(maxLives(), lives + 1);
         game.applyStatus(StatusKind.GHOST, 220);
+        unlock("konami");
         toast("the code. of course.");
     }
 
@@ -841,11 +941,18 @@ public class EmojiSnakeApp extends Application {
                 sound.bonus();
                 particles.burst(c[0], c[1], (int) (34 * juice()), Color.web("#d7b16a"), 240);
                 camera.kick(0.05 * juice());
-                com.emojisnake.vn.Story novel = pickNovel();
-                if (novel != null) {
-                    interlude = new VisualNovelInterlude(novel, vnArt, metaUnlocked);
+                if (game.isBasilisk()) {
+                    // As a 🐔 basilisk you can read the firm's forbidden founding file (a 📖 hiding among
+                    // the 🐍 "meals"): a rare hidden VN, NOT counted toward the 5/5 gate. Farmable in
+                    // chicken mode (books stay armed via refreshBooksEnabled while transformed).
+                    interlude = new VisualNovelInterlude(VisualNovels.hidden(), vnArt, metaUnlocked, null);
                 } else {
-                    toast("you've read every file in the firm. (for now.)");
+                    com.emojisnake.vn.Story novel = pickNovel();
+                    if (novel != null) {
+                        interlude = new VisualNovelInterlude(novel, vnArt, metaUnlocked);
+                    } else {
+                        toast("you've read every file in the firm. (for now.)");
+                    }
                 }
             }
             case FLEE -> {
@@ -871,6 +978,8 @@ public class EmojiSnakeApp extends Application {
                 camera.addTrauma(0.4 * juice());
                 camera.kick(0.07 * juice());
                 headPop.restart();
+                unlock("cockatrice");
+                refreshBooksEnabled(); // keep 📖 armed while transformed, so the hidden VN is reachable/farmable
                 toast(metaUnlocked ? "you are become chicken. eat the 🥚 to change back."
                         : "BAWK! eat the 🥚 to change back!", TOAST_LONG);
             }
@@ -878,6 +987,7 @@ public class EmojiSnakeApp extends Application {
                 sound.bonus();
                 particles.burst(c[0], c[1], (int) (30 * juice()), Color.web("#fff3b0"), 240);
                 camera.kick(0.05 * juice());
+                refreshBooksEnabled(); // no longer a chicken: books retire again if this run is 5/5
                 toast("snake again. mostly.");
             }
             case SLOT -> {
@@ -902,6 +1012,9 @@ public class EmojiSnakeApp extends Application {
                 toast(metaUnlocked
                         ? String.format(Locale.ROOT, "📈 +1 share  ·  portfolio %.1fx", game.stockMultiplier())
                         : String.format(Locale.ROOT, "📈 stock! score x%.1f", game.stockMultiplier()));
+                if (game.shares() >= Achievements.BASE_MAX_SHARES) {
+                    unlock("bull_market"); // held a full base portfolio at once
+                }
             }
             case CRASH -> {
                 // Margin call: the market corrected and halved the portfolio. Red "down" jolt.
@@ -913,6 +1026,7 @@ public class EmojiSnakeApp extends Application {
                         ? String.format(Locale.ROOT, "📉 MARGIN CALL - the market halved your shares (now %.1fx)",
                                 game.stockMultiplier())
                         : "📉 the market crashed! your shares were halved.", TOAST_LONG);
+                unlock("margin_call"); // you weathered a crash
             }
         }
     }
@@ -1071,9 +1185,13 @@ public class EmojiSnakeApp extends Application {
             case G -> { if (debug && started && game.status() == GameState.Status.RUNNING) game.forceShed(); return; }
             case B -> {
                 if (debug && started && game.status() == GameState.Status.RUNNING) {
-                    com.emojisnake.vn.Story novel = pickNovel();
-                    if (novel != null) {
-                        interlude = new VisualNovelInterlude(novel, vnArt, metaUnlocked);
+                    if (game.isBasilisk()) {
+                        interlude = new VisualNovelInterlude(VisualNovels.hidden(), vnArt, metaUnlocked, null);
+                    } else {
+                        com.emojisnake.vn.Story novel = pickNovel();
+                        if (novel != null) {
+                            interlude = new VisualNovelInterlude(novel, vnArt, metaUnlocked);
+                        }
                     }
                 }
                 return;
@@ -1095,6 +1213,20 @@ public class EmojiSnakeApp extends Application {
                 if (debug && started && game.status() == GameState.Status.RUNNING) {
                     Point h = game.snakeBody().get(0);
                     game.forceStockFood(h.step(game.direction()));
+                }
+                return;
+            }
+            case X -> { // the ACHIEVEMENTS viewer (player-facing; only once the meta layer is awake)
+                if (metaUnlocked && interlude == null) {
+                    int n = Achievements.countUnlocked(meta.achievements());
+                    interlude = new AchievementsInterlude(meta.achievements(), game.shares(),
+                            Achievements.capFor(n), Achievements.floorFor(n));
+                }
+                return;
+            }
+            case Y -> { // debug: open the Buchmann Pac-Man boss
+                if (debug && started && game.status() == GameState.Status.RUNNING) {
+                    interlude = new BuchmannBossInterlude(atlas, WIDTH, HEIGHT, lives);
                 }
                 return;
             }
@@ -1164,9 +1296,10 @@ public class EmojiSnakeApp extends Application {
             // Back-room reward: floor progress resets each run, but the DEEPEST you've ever reached
             // (meta.rank) seeds this run's portfolio - so re-descending isn't from scratch, you start
             // richer. Progress-based (not wall-clock), so it can't be farmed by idling/pausing.
-            if (metaUnlocked && meta.rank() > 0) {
-                game.grantShares(meta.rank()); // clamps to the portfolio cap internally
-                toast("carried down from floor " + meta.rank() + ": " + game.shares() + " shares (📈 "
+            int startShares = Math.max(meta.rank(), Achievements.floorFor(Achievements.countUnlocked(meta.achievements())));
+            if (metaUnlocked && startShares > 0) {
+                game.grantShares(startShares); // deepest floor ever + the achievement floor; clamps to the cap
+                toast("opening portfolio: " + game.shares() + " shares (📈 "
                         + String.format(Locale.ROOT, "%.1fx", game.stockMultiplier()) + ")", TOAST_LONG);
             }
         }
@@ -1191,6 +1324,7 @@ public class EmojiSnakeApp extends Application {
         // The gaslight is ONLY for the plain pre-wake games: it caps a too-long plain run (walls in
         // your face burn your lives) to push you to the wake-up. Once awake, the chaos does that job.
         game.setGaslightEnabled(!metaUnlocked);
+        applyStockCaps(); // achievements raise the 📈 ceiling + floor (base/none until awake)
         updateTitle(); // the title hint ("eye-bleed edition") only appears once it's awake
     }
 
@@ -1202,7 +1336,10 @@ public class EmojiSnakeApp extends Application {
      * again after each finished novel.
      */
     private void refreshBooksEnabled() {
-        game.setBooksEnabled(metaUnlocked && vnSeenThisRun.size() < VisualNovels.all().size());
+        // Books drop while this run still has unread novels - OR while you're a 🐔 basilisk, so the hidden
+        // founding-file VN stays reachable/farmable even after the 5/5 retirement (re-armed on BASILISK).
+        boolean chicken = game.isBasilisk();
+        game.setBooksEnabled(metaUnlocked && (chicken || vnSeenThisRun.size() < VisualNovels.all().size()));
     }
 
     /** Window title: plain for the pre-wake runs (no "eye-bleed" hint), full once the meta is awake. */
@@ -1257,6 +1394,8 @@ public class EmojiSnakeApp extends Application {
         fakeCrashUsedThisRun = false; // one fake crash per run
         floorThisRun = 0;             // back-room floor progress does NOT carry across a death
         vnSeenThisRun.clear();        // a fresh run may see any novel again
+        vnBadEndThisRun.clear();      // the "ruin every romance" achievement must be earned in ONE run
+        bossIndex = 0;                // alternate dodge/Buchmann fresh each run
     }
 
     // --- rendering -----------------------------------------------------------
@@ -1449,7 +1588,8 @@ public class EmojiSnakeApp extends Application {
         gc.setTextAlign(TextAlignment.RIGHT);
         String flags = (sound.isEnabled() ? "" : "  (muted)") + (calm ? "  (calm)" : "");
         String prog = (floorThisRun > 0 ? "F" + floorThisRun + "/" + MAX_FLOORS + "  " : "")
-                + (meta.trim() > 0 ? "✂" + meta.trim() + "  " : "");
+                + (meta.trim() > 0 ? "✂" + meta.trim() + "  " : "")
+                + (metaUnlocked ? "★" + Achievements.countUnlocked(meta.achievements()) + "/" + Achievements.count() + "  " : "");
         String lvlStr = prog + "Lvl " + game.level() + flags;
         gc.fillText(glitch.garble(lvlStr), WIDTH - 14 + j, mid + j);
 
@@ -1531,9 +1671,15 @@ public class EmojiSnakeApp extends Application {
 
         switch (game.status()) {
             case PAUSED -> drawText(gc, "PAUSED", List.of("press Space or P to resume"));
-            case GAME_OVER -> drawText(gc, gameOverTitle, List.of(
-                    "score " + game.score() + (newBest ? "   - your new peak. congrats?" : ""),
-                    metaUnlocked ? gameOverQuote : "press R or Enter to play again"));
+            case GAME_OVER -> {
+                java.util.List<String> lines = new java.util.ArrayList<>();
+                lines.add("score " + game.score() + (newBest ? "   - your new peak. congrats?" : ""));
+                lines.add(metaUnlocked ? gameOverQuote : "press R or Enter to play again");
+                if (metaUnlocked) {
+                    lines.add("R to play again  ·  X for achievements");
+                }
+                drawText(gc, gameOverTitle, lines);
+            }
             case RUNNING -> {
                 if (!started) {
                     drawStartPrompt(gc); // press-to-start / resume-after-revive
@@ -1555,7 +1701,9 @@ public class EmojiSnakeApp extends Application {
                     : List.of("press a direction to crawl on");
         } else {
             title = metaUnlocked ? startQuote : "EMOJI SNAKE";
-            lines = List.of("press  ↑ ↓ ← →  or  WASD  to begin");
+            lines = metaUnlocked
+                    ? List.of("press  ↑ ↓ ← →  or  WASD  to begin", "X for achievements")
+                    : List.of("press  ↑ ↓ ← →  or  WASD  to begin");
         }
         drawText(gc, title, lines);
     }
@@ -1592,6 +1740,24 @@ public class EmojiSnakeApp extends Application {
      */
     private void renderSnapshotAndExit(String arg) {
         // The takeover screens all snapshot the same way; only the interlude + warm-up frames vary.
+        // NOTE: check these before the generic "vn" branch - "chickenvn" contains "vn".
+        if (arg.contains("achievements")) {
+            snapshotInterludeAndExit(new AchievementsInterlude(
+                    Set.of("margin_call", "cockatrice", "untouchable", "jackpot", "vested"), 8,
+                    Achievements.capFor(5), Achievements.floorFor(5)), 20, "snapshot-achievements.png");
+            return;
+        }
+        if (arg.contains("buchmann")) {
+            BuchmannBossInterlude bm = new BuchmannBossInterlude(atlas, WIDTH, HEIGHT, 3);
+            bm.handleKey(KeyCode.UP); // drive Pac-Man upward so the shot shows a moving (facing-up) chomper
+            snapshotInterludeAndExit(bm, 90, "snapshot-buchmann.png"); // 90 frames move Pac + the ghosts
+            return;
+        }
+        if (arg.contains("chickenvn")) {
+            snapshotInterludeAndExit(new VisualNovelInterlude(VisualNovels.hidden(), vnArt, true, null),
+                    260, "snapshot-chickenvn.png");
+            return;
+        }
         if (arg.contains("boss")) {
             snapshotInterludeAndExit(new DodgeBossInterlude(atlas, WIDTH, HEIGHT, 3), 120,
                     "snapshot-boss.png"); // 120 frames populate the projectiles
@@ -1727,6 +1893,10 @@ public class EmojiSnakeApp extends Application {
             }
         }
         saveStore = new SaveStore(sink.resolve("save.dat"));
+        // ...and start from a FRESH meta: start() loaded the player's REAL save.dat into `meta` before this
+        // redirect, so without this a scenario that doesn't reset meta would inherit the dev's real
+        // achievements/rank - a self-test that passes/fails based on personal save state, not the code.
+        meta = new SaveStore.Save(0, 0, false);
 
         runOne(only, "food", this::playFood);
         runOne(only, "powerup", this::playPowerup);
@@ -1753,6 +1923,10 @@ public class EmojiSnakeApp extends Application {
         runOne(only, "ending-locked", this::playEndingBlockedUntilNovelsRead);
         runOne(only, "ending", this::playEnding);
         runOne(only, "win", this::playWin);
+        runOne(only, "achievements", this::playAchievements);
+        runOne(only, "buchmann", this::playBuchmann);
+        runOne(only, "chicken-vn", this::playChickenVn);
+        runOne(only, "bad-ends", this::playBadEnds);
 
         System.out.println("\n=== PLAY REPORT ===");
         playReport.forEach(System.out::println);
@@ -1938,6 +2112,145 @@ public class EmojiSnakeApp extends Application {
     /** First keypress at a node just fast-forwards the typewriter; this consumes that. */
     private void vnReveal() {
         interlude.handleKey(KeyCode.SPACE);
+    }
+
+    private void playAchievements() {
+        beginPlay(5L);
+        meta = new SaveStore.Save(0, 0, false); // no achievements yet
+        metaUnlocked = true;
+        applyMetaGameFlags();
+
+        // Baseline: zero achievements -> the base cap of 12.
+        game.grantShares(100);
+        check(game.shares() == Achievements.BASE_MAX_SHARES, "base portfolio cap should be 12: " + game.shares());
+        game.grantShares(-100); // reset the portfolio to 0
+
+        // A real hook: a flawless dodge unlocks "untouchable".
+        DodgeBossInterlude boss = new DodgeBossInterlude(atlas, WIDTH, HEIGHT, lives);
+        interlude = boss;
+        boss.forceHits(0);
+        finishInterlude();
+        check(meta.achievements().contains("untouchable"), "flawless boss did not unlock its achievement");
+
+        // Two more unlocks -> 3 total -> a raised ceiling and a crash-proof floor, applied live.
+        unlock("margin_call");
+        unlock("cockatrice");
+        check(meta.achievements().size() == 3, "expected 3 unlocks: " + meta.achievements());
+        game.grantShares(100);
+        check(game.shares() == Achievements.capFor(3),
+                "the ceiling must rise with achievements: " + game.shares() + " vs " + Achievements.capFor(3));
+        game.forceCrash();
+        check(game.shares() >= Achievements.floorFor(3),
+                "a crash must not drop below the achievement floor: " + game.shares());
+
+        // Persistence: the unlocks survive a save round-trip (through SaveCodec, in the temp dir).
+        SaveStore.Save reloaded = saveStore.load();
+        check(reloaded.achievements().containsAll(meta.achievements()),
+                "achievements did not persist to the save: " + reloaded.achievements());
+
+        // The viewer opens on X and closes on X.
+        inputLockoutT = 0; // the boss finish armed the anti-mash lockout; clear it so X registers
+        handleKey(KeyCode.X);
+        check(interlude instanceof AchievementsInterlude, "X did not open the achievements viewer");
+        playRenderAndSnap("viewer");
+        interlude.handleKey(KeyCode.X);
+        check(interlude.isDone(), "X did not close the viewer");
+        finishInterlude();
+        check(interlude == null, "the viewer did not hand back");
+    }
+
+    private void playBuchmann() {
+        // Graduated: clearing the maze pays the bonus and unlocks the achievement.
+        beginPlay(5L);
+        meta = new SaveStore.Save(0, 0, false); // fresh: the real save must not pre-satisfy the unlock assert
+        metaUnlocked = true;
+        applyMetaGameFlags();
+        BuchmannBossInterlude boss = new BuchmannBossInterlude(atlas, WIDTH, HEIGHT, lives);
+        interlude = boss;
+        playRenderAndSnap("maze");
+        int scoreBefore = game.score();
+        boss.forceCleared();
+        check(boss.isDone(), "forceCleared must end the fight");
+        finishInterlude();
+        check(interlude == null && !started, "cleared boss did not hand back to the crawl prompt");
+        check(game.score() == scoreBefore + 40, "graduation bonus not paid: " + game.score());
+        check(meta.achievements().contains("buchmann_grad"), "clearing the faculty must unlock its achievement");
+
+        // Caught to zero lives: the run ends.
+        beginPlay(6L);
+        BuchmannBossInterlude b2 = new BuchmannBossInterlude(atlas, WIDTH, HEIGHT, lives);
+        interlude = b2;
+        b2.forceHits(lives);
+        finishInterlude();
+        check(lives == 0 && game.status() == GameState.Status.GAME_OVER, "losing every life must end the run");
+        playRenderAndSnap("gameover");
+    }
+
+    private void playChickenVn() {
+        beginPlay(5L);
+        meta = new SaveStore.Save(0, 0, false); // fresh: the real save must not pre-satisfy the unlock assert
+        metaUnlocked = true;
+        applyMetaGameFlags();
+        // Read all 5 novels this run: books would normally retire...
+        for (com.emojisnake.vn.Story s : VisualNovels.all()) {
+            vnSeenThisRun.add(s.id());
+        }
+        refreshBooksEnabled();
+        check(!game.isBooksEnabled(), "books should be retired at 5/5 when NOT a chicken");
+
+        // ...become a 🐔 basilisk: books must re-arm so the hidden founding-file VN stays reachable.
+        game.forceBasilisk(new Point(1, 1)); // egg well away from the head/ahead cell
+        check(game.isBasilisk(), "forceBasilisk did not transform");
+        refreshBooksEnabled(); // exactly what the BASILISK notice handler does
+        check(game.isBooksEnabled(), "books must re-arm while a chicken (to farm the hidden VN)");
+
+        // Eating a book while a chicken opens the HIDDEN VN (not counted, no life cost).
+        int novelsBefore = vnSeenThisRun.size();
+        int livesBefore = lives;
+        game.forceBook(ahead());
+        step();
+        check(interlude instanceof VisualNovelInterlude, "a book as a chicken did not open a VN");
+        check(interlude instanceof VisualNovelInterlude vn && vn.story().id().equals(VisualNovels.HIDDEN_ID),
+                "the chicken book must open the HIDDEN founding-file VN, not a normal novel");
+        playRenderAndSnap("hidden");
+        for (int n = 0; n < 24 && interlude != null && !interlude.isDone(); n++) {
+            interlude.handleKey(KeyCode.SPACE);
+        }
+        check(interlude != null && interlude.isDone(), "could not page the hidden VN to its end");
+        finishInterlude();
+        check(vnSeenThisRun.size() == novelsBefore, "the hidden VN must NOT count toward the 5/5 gate");
+        check(lives == livesBefore, "the hidden VN must not cost a life");
+        check(meta.achievements().contains("employee_one"), "the hidden VN must unlock its achievement");
+    }
+
+    private void playBadEnds() {
+        // The hard easter egg: a lethal BAD END in ALL 5 novels, in a single (heavily-lived) run.
+        beginPlay(5L);
+        meta = new SaveStore.Save(0, 0, false); // fresh: the real save must not pre-satisfy the unlock assert
+        metaUnlocked = true;
+        applyMetaGameFlags();
+        lives = 8; // plenty, so five life-costing BAD ENDs don't end the run before the 5th
+        java.util.Map<String, int[]> routes = new java.util.HashMap<>();
+        routes.put("billable", new int[] {1});        // refuse to bill a dying man
+        routes.put("merger", new int[] {3});          // warn Hartwell
+        routes.put("probono", new int[] {1, 3});      // -> read -> blow the whistle
+        routes.put("partner_track", new int[] {3});   // withdraw selflessly
+        routes.put("retainer", new int[] {1});        // mount a real defence
+        for (com.emojisnake.vn.Story s : VisualNovels.all()) {
+            vnSeenThisRun.add(s.id());
+            interlude = new VisualNovelInterlude(s, vnArt, true, null); // authored order -> fixed digit routes
+            for (int digit : routes.get(s.id())) {
+                vnReveal();
+                interlude.handleKey(KeyCode.valueOf("DIGIT" + digit));
+            }
+            check(interlude instanceof VisualNovelInterlude vn && vn.died(),
+                    "route for " + s.id() + " did not reach a BAD END");
+            vnReveal();
+            interlude.handleKey(KeyCode.SPACE); // acknowledge the lethal ending
+            finishInterlude();
+        }
+        check(meta.achievements().contains("the_whole_tragedy"),
+                "a BAD END in all 5 novels (one run) must unlock the tragedy achievement");
     }
 
     private void playStoreBuy() {
