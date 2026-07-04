@@ -151,6 +151,8 @@ public class EmojiSnakeApp extends Application {
     private final java.util.Set<String> vnSeenThisRun = new java.util.HashSet<>(); // novels read THIS run (no repeats; with floorThisRun, gates the ending)
     private Stage stage;              // kept for the window-shrink gag
     private boolean shrinking;        // a window-shrink animation is in progress
+    private javafx.scene.transform.Scale boardScale; // uniform fit-scale on layers.root() (maximize/resize)
+    private double gagShrink = 1.0;   // 1.0 normally; the box gag drives it <1 for the in-window shrink (maximized)
     private double inputLockoutT;     // brief deafness after a stop, so mashed keys don't carry over
     private double escQuitT;          // >0: ESC pressed once; a second press inside the window quits
     private double memeFlashTimer;    // the big "6 7" meme overlay
@@ -209,8 +211,20 @@ public class EmojiSnakeApp extends Application {
             glitch.setMetaUnlocked(true); // --awake: skip straight to the deranged layer
         }
 
-        Scene scene = new Scene(layers.root(), WIDTH, HEIGHT, BG);
+        // Wrap the fixed 640×696 board in a letterbox frame so the window can be resized/maximized like
+        // normal software: relayout() scales layers.root() to fit, the Pane's BG fills the letterbox bars.
+        boardScale = new javafx.scene.transform.Scale(1, 1, 0, 0); // pivot top-left; translate does centering
+        layers.root().getTransforms().add(boardScale);
+        // Clip to the board rect (root-local, so it scales with boardScale) - keeps camera-shake / chromatic
+        // overscan off the letterbox bars, exactly as the window edge used to clip it.
+        layers.root().setClip(new javafx.scene.shape.Rectangle(WIDTH, HEIGHT));
+        var frame = new javafx.scene.layout.Pane(layers.root());
+        frame.setBackground(new javafx.scene.layout.Background(
+                new javafx.scene.layout.BackgroundFill(BG, null, null)));
+        Scene scene = new Scene(frame, WIDTH, HEIGHT, BG);
         scene.setOnKeyPressed(e -> handleKey(e.getCode()));
+        scene.widthProperty().addListener((o, ov, nv) -> relayout(nv.doubleValue(), scene.getHeight()));
+        scene.heightProperty().addListener((o, ov, nv) -> relayout(scene.getWidth(), nv.doubleValue()));
 
         this.stage = stage; // kept for the window-shrink gag
         updateTitle(); // plain "Emoji Snake" until the deranged layer wakes, then the full title
@@ -219,9 +233,14 @@ public class EmojiSnakeApp extends Application {
             stage.getIcons().add(new Image(iconStream));
         }
         stage.setScene(scene);
-        stage.setResizable(false);
+        stage.setResizable(true); // resizable + maximizable like regular software (no exclusive fullscreen)
         if (!smoke) {
             stage.show();
+            relayout(scene.getWidth(), scene.getHeight()); // fit for the initial size
+            // Floor the window well below the box gag's 0.62 shrink so the windowed gag never hits the min.
+            double chromeW = stage.getWidth() - scene.getWidth(), chromeH = stage.getHeight() - scene.getHeight();
+            stage.setMinWidth(WIDTH * 0.5 + chromeW);
+            stage.setMinHeight(HEIGHT * 0.5 + chromeH);
         }
 
         sound.start();
@@ -645,8 +664,28 @@ public class EmojiSnakeApp extends Application {
     }
 
     /**
-     * The "walls closing in" gag: eating a 📦 box food squeezes the whole window down for a few seconds,
-     * then restores it. Window-only theatre; a no-op during the headless self-checks or mid-shrink.
+     * Fit the fixed 640×696 render tree into the current window, centered, aspect preserved, with dark
+     * letterbox bars filling the rest. Scales {@code layers.root()} uniformly - so the board, HUD, CRT,
+     * glitch, particles, camera shake and every interlude scale together with zero per-draw math changes.
+     * The {@code gagShrink} multiplier lets the box gag squeeze the board inward while maximized.
+     */
+    private void relayout(double vw, double vh) {
+        if (boardScale == null) {
+            return; // not installed (headless self-checks build their own fixed-size Scene)
+        }
+        double s = Math.min(vw / WIDTH, vh / HEIGHT) * gagShrink;
+        boardScale.setX(s);
+        boardScale.setY(s);
+        layers.root().setTranslateX((vw - WIDTH * s) / 2.0);  // center -> symmetric letterbox bars
+        layers.root().setTranslateY((vh - HEIGHT * s) / 2.0);
+    }
+
+    /**
+     * The "walls closing in" gag: eating a 📦 box food squeezes the play area down for a few seconds,
+     * then restores it. When the window is in a normal restored state it physically shrinks the OS window
+     * (the resize listener re-fits the board as it goes); when maximized - where a window can't sanely
+     * resize - it instead squeezes the board inward via {@code gagShrink}. Window-only theatre; a no-op
+     * during the headless self-checks or mid-shrink.
      */
     private void windowShrink() {
         if (smoke || stage == null || shrinking) {
@@ -655,21 +694,32 @@ public class EmojiSnakeApp extends Application {
         shrinking = true;
         toast("📦 the walls are closing in.", TOAST_LONG);
         final double small = 0.62;
-        // Window chrome (title bar + borders): outer size minus the WIDTH×HEIGHT client area.
-        final double chromeW = stage.getWidth() - WIDTH;
-        final double chromeH = stage.getHeight() - HEIGHT;
-        // Scale the board from the TOP-LEFT (not the centre), so the shrunk board stays pinned to the
-        // window corner and the whole field is visible - the old centre-pivot scale cropped the edges
-        // off-screen, which got the player killed against a wall they couldn't see.
-        var scale = new javafx.scene.transform.Scale(1, 1, 0, 0);
-        layers.root().getTransforms().add(scale);
+        final Scene scene = stage.getScene();
+        // A maximized window can't sanely be resized, so squeeze the board inward instead; a normal
+        // restored window physically shrinks (relayout re-fits the board as the client area changes).
+        final boolean maximized = stage.isMaximized();
+
+        // Live client size + chrome (title bar + borders) at the moment the gag fires - not the fixed
+        // WIDTH×HEIGHT, so it's correct whatever size the user has dragged/maximized the window to.
+        final double startClientW = scene.getWidth(), startClientH = scene.getHeight();
+        final double chromeW = stage.getWidth() - startClientW, chromeH = stage.getHeight() - startClientH;
+        final double restoreW = stage.getWidth(), restoreH = stage.getHeight();
+        final double minW = stage.getMinWidth(), minH = stage.getMinHeight();
+        if (!maximized) {
+            stage.setMinWidth(0);  // let the physical shrink dip below the usual floor for the duration
+            stage.setMinHeight(0);
+        }
+
         var s = new javafx.beans.property.SimpleDoubleProperty(1.0);
         s.addListener((o, ov, nv) -> {
             double f = nv.doubleValue();
-            scale.setX(f);
-            scale.setY(f);
-            stage.setWidth(WIDTH * f + chromeW);   // client = WIDTH*f, so the scaled board fits exactly
-            stage.setHeight(HEIGHT * f + chromeH);
+            if (maximized) {
+                gagShrink = f;                         // board shrinks within the maximized window
+                relayout(scene.getWidth(), scene.getHeight());
+            } else {
+                stage.setWidth(startClientW * f + chromeW);   // the OS window physically shrinks;
+                stage.setHeight(startClientH * f + chromeH);  // its resize listener re-fits the board
+            }
         });
         var tl = new javafx.animation.Timeline(
                 new javafx.animation.KeyFrame(javafx.util.Duration.ZERO,
@@ -681,10 +731,15 @@ public class EmojiSnakeApp extends Application {
                 new javafx.animation.KeyFrame(javafx.util.Duration.seconds(3.1),
                         new javafx.animation.KeyValue(s, 1.0)));
         tl.setOnFinished(e -> {
-            layers.root().getTransforms().remove(scale);
-            stage.setWidth(WIDTH + chromeW);
-            stage.setHeight(HEIGHT + chromeH);
-            stage.centerOnScreen();
+            if (maximized) {
+                gagShrink = 1.0;
+                relayout(scene.getWidth(), scene.getHeight());
+            } else {
+                stage.setWidth(restoreW);   // back to the pre-gag size/position (no recenter jump)
+                stage.setHeight(restoreH);
+                stage.setMinWidth(minW);
+                stage.setMinHeight(minH);
+            }
             shrinking = false;
         });
         tl.play();
